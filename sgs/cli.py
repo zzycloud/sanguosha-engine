@@ -37,7 +37,11 @@ def main():
         for i, o in enumerate(d.options):
             print(f"  {i}. {o.label}")
         while True:
-            s = input("> ").strip()
+            try:
+                s = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n已退出")
+                return
             if s.isdigit() and int(s) < len(d.options):
                 g.act(int(s))
                 break

@@ -13,15 +13,36 @@
 
 ## 快速开始
 
-需要 Python 3.9+。
+需要 Python 3.9 以上，引擎本身没有第三方依赖。
 
 ```bash
-pip install -e ".[dev]"      # 只装 pytest，引擎本身无依赖
-python -m pytest             # 跑规则单测
-python -m sgs.tools.bench --games 500        # 测速
-python -m sgs.replay --seed 1 --generals 关羽 吕布 -o replay.html   # 生成一局录像，浏览器直接打开
-python -m sgs.cli            # 在终端和规则 AI 打一局
-python -m sgs.tools.serve    # 本地网页对战：打开 http://127.0.0.1:8000/?live=1&human=0
+git clone https://github.com/zzycloud/sanguosha-engine.git
+cd sanguosha-engine
+python3 -m venv .venv && source .venv/bin/activate     # Windows：.venv\Scripts\activate
+pip install -e ".[dev]"                                  # 只额外装 pytest
+```
+
+**看一局 AI 对战的录像**（生成一个 HTML，用浏览器直接打开，方向键逐步回放）：
+
+```bash
+python -m sgs.replay --seed 1 --generals 关羽 吕布 -o replay.html
+python -m sgs.replay --seed 7 --agents rule random -o replay2.html   # 不指定武将就随机
+```
+
+**自己和规则 AI 打**：
+
+```bash
+python -m sgs.cli --generals 诸葛亮 吕布          # 终端里打，输入选项编号，你是 0 号位
+python -m sgs.tools.serve --generals 诸葛亮 吕布   # 网页里打，按提示打开 http://127.0.0.1:8000/?live=1&human=0
+python -m sgs.tools.serve --human -1               # 网页里看两个规则 AI 实时对打
+```
+
+**跑测试和测速**：
+
+```bash
+python -m pytest                       # 108 个规则单测
+python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
+python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```
 
 ## 用法：类 gym 接口
