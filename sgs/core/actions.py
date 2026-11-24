@@ -151,8 +151,10 @@ class TriggerFrame(Frame):
         # stage 2: 是否发动
         ans = g.answer()
         self.stage = 1
+        s, name = self.cur
+        if ans.key != ("yes",):
+            g.log(f"{g.pname(s)} 没有发动【{name}】", "pass", seat=s, skill=name)
         if ans.key == ("yes",):
-            s, name = self.cur
             g.log(f"{g.pname(s)} 发动了【{name}】", "skill", seat=s, skill=name)
             f = R.SKILLS[name].make_frame(g, s, self.event, self.ev)
             if f is not None:
@@ -306,12 +308,16 @@ class TurnFrame(Frame):
         elif st == 2:
             g.phase = "judge"
             self.stage = 3
-            if "judge" not in self.ev.skip:
+            if "judge" in self.ev.skip:
+                g.log(f"{g.pname(self.seat)} 跳过判定阶段", "skip", seat=self.seat)
+            elif p.judges:
+                g.log(f"{g.pname(self.seat)} 进入判定阶段", "phase", seat=self.seat, phase="judge")
                 g.push(JudgePhaseFrame(self.seat, self.ev))
         elif st == 3:
             g.phase = "draw"
             self.stage = 5
             if "draw" in self.ev.skip:
+                g.log(f"{g.pname(self.seat)} 跳过摸牌阶段", "skip", seat=self.seat)
                 return
             self.draw = Ev(seat=self.seat, count=g.mode.draw_phase_count(g, self.seat, 2))
             self.stage = 4
@@ -319,14 +325,17 @@ class TurnFrame(Frame):
         elif st == 4:
             if self.draw.count > 0:
                 g.draw(self.seat, self.draw.count, "摸牌阶段")
+            else:
+                g.log(f"{g.pname(self.seat)} 摸牌阶段不摸牌", "draw", seat=self.seat)
             self.stage = 5
         elif st == 5:
             g.phase = "play"
             self.stage = 6
             if "play" not in self.ev.skip:
+                g.log(f"{g.pname(self.seat)} 进入出牌阶段（手牌 {len(p.hand)}）", "phase", seat=self.seat, phase="play")
                 g.push(PlayPhaseFrame(self.seat))
             else:
-                g.log(f"{g.pname(self.seat)} 跳过出牌阶段", "skip")
+                g.log(f"{g.pname(self.seat)} 跳过出牌阶段", "skip", seat=self.seat)
         elif st == 6:
             g.phase = "discard"
             self.stage = 7
@@ -334,9 +343,11 @@ class TurnFrame(Frame):
         elif st == 7:
             self.stage = 8
             if "discard" in self.ev.skip:
-                g.log(f"{g.pname(self.seat)} 跳过弃牌阶段", "skip")
+                g.log(f"{g.pname(self.seat)} 跳过弃牌阶段", "skip", seat=self.seat)
                 return
             n = len(p.hand) - g.max_hand(self.seat)
+            g.log(f"{g.pname(self.seat)} 弃牌阶段：手牌 {len(p.hand)}，上限 {g.max_hand(self.seat)}"
+                  + (f"，需弃 {n} 张" if n > 0 else "，不用弃牌"), "phase", seat=self.seat, phase="discard")
             if n > 0:
                 g.push(DiscardFrame(self.seat, n, "h", "discard_phase", f"弃牌阶段：请弃置 {n} 张手牌"))
         elif st == 8:
@@ -347,6 +358,10 @@ class TurnFrame(Frame):
             self._end(g)
 
     def _end(self, g):
+        p = g.players[self.seat]
+        if p.alive:
+            g.log(f"{g.pname(self.seat)} 回合结束（手牌 {len(p.hand)}，体力 {p.hp}/{p.max_hp}）", "phase",
+                  seat=self.seat, phase="end")
         g.phase = ""
         nxt = g.next_alive(self.seat)
         g.done()
@@ -386,6 +401,7 @@ class PlayPhaseFrame(Frame):
             self.stage = 0
             k = ans.key
             if k[0] == "end":
+                g.log(f"{g.pname(self.seat)} 结束出牌阶段", "phase", seat=self.seat, phase="play_end")
                 g.done()
                 return
             if k[0] == "use":
@@ -533,11 +549,16 @@ class NullifyFrame(Frame):
                                {"names": [NULLIFY], "trick": self.trick, "user": self.user,
                                 "target": self.target, "nullified": bool(self.count % 2)}))
                 return
+            if self.count:
+                res = "被抵消" if self.count % 2 else "仍然生效"
+                g.log(f"无懈可击结算完毕：【{self.trick}】对 {g.pname(self.target)} {res}", "info",
+                      trick=self.trick, target=self.target, nullified=bool(self.count % 2))
             g.done(bool(self.count % 2))
             return
         if self.stage == 2:
             ans = g.answer()
             if ans.key == PASS:
+                g.log("", "pass", private={self.cur: f"{g.pname(self.cur)} 没有使用无懈可击"}, seat=self.cur)
                 self.idx += 1
                 self.stage = 1
                 return
@@ -579,11 +600,17 @@ class AskForCardFrame(Frame):
                 for label in R.SKILLS[sk].response_options(g, self.seat, self.names, self.ctx):
                     opts.append(Option(("skill", sk), label))
             opts.append(Option(PASS, "不出"))
+            self.n_opts = len(opts)
             self.stage = 1
             g.ask(Decision(self.seat, "respond", self.prompt, opts, dict(self.ctx, names=list(self.names))))
         elif st == 1:
             ans = g.answer()
             if ans.key == PASS:
+                verb = "使用" if self.used else "打出"
+                what = "/".join(self.names)
+                why = "没有可用的牌" if self.n_opts == 1 else "选择不出"
+                g.log(f"{g.pname(self.seat)} 没有{verb}{what}", "pass",
+                      private={self.seat: why}, seat=self.seat, names=list(self.names))
                 g.done(None)
                 return
             if ans.key[0] == "skill":

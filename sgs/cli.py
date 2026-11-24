@@ -1,7 +1,7 @@
 """命令行对战：python -m sgs.cli [--generals 关羽 吕布] [--seed 1]（你是 0 号位，对手是规则 AI）"""
 import argparse
 
-from .agents import RuleAgent
+from .agents import RuleAgent, decide
 from .core.game import Game
 
 
@@ -30,7 +30,7 @@ def main():
         seen = len(g.logs)
         d = g.pending
         if d.player != 0:
-            g.act(ai.choose(g, d))
+            g.act(decide(ai, g))
             continue
         show(g, 0)
         print(d.prompt)

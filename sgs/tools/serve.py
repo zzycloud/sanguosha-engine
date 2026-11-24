@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 from ..agents import RuleAgent
 from ..core.game import Game
-from ..replay import decision_dict
+from ..replay import Recorder
 
 WEB = os.path.join(os.path.dirname(__file__), "..", "..", "web", "index.html")
 
@@ -21,42 +21,35 @@ class Session:
     def __init__(self, human, generals=None, seed=None):
         self.human = human
         seed = random.randrange(10 ** 6) if seed is None else seed
-        kw = {"generals": generals} if generals else {}
-        self.g = Game("duel", seed=seed, **kw)
+        kw = {"generals": generals} if generals else {"pick": "random"}
+        self.g = Game("duel", seed=seed, auto_single=False, **kw)
         self.agents = [RuleAgent(seed), RuleAgent(seed + 1)]
-        self.steps, self.seen = [], 0
-        self.advance()
-
-    def _record(self, i):
-        g = self.g
-        self.steps.append({"state": g.observe(None), "logs": g.logs[self.seen:],
-                           "decision": decision_dict(g.pending), "chosen": i})
-        self.seen = len(g.logs)
-        g.act(i)
-
-    def advance(self):
-        g = self.g
-        while not g.over and g.pending.player != self.human:
-            self._record(self.agents[g.pending.player].choose(g, g.pending))
+        if human is not None:
+            self.agents[human] = None
+        self.rec = Recorder(self.g)
+        self.rec.run(self.agents)
 
     def act(self, i):
-        if not self.g.over and self.g.pending.player == self.human:
-            self._record(i)
-            self.advance()
+        g = self.g
+        if not g.over and g.pending.player == self.human and 0 <= i < len(g.pending.options):
+            self.rec.act(i)
+            self.rec.run(self.agents)
 
     def replay(self):
         g = self.g
-        viewer = None if self.human is None else self.human
-        cur = {"state": g.observe(None), "logs": g.logs[self.seen:],
-               "decision": decision_dict(g.pending) if g.pending else None, "chosen": None}
-        steps = self.steps + [cur]
-        if viewer is not None and not g.over:  # 对战时隐藏 AI 手牌
-            steps = [dict(s, state=_hide(s["state"], viewer)) for s in steps]
-            steps[-1]["logs"] = [_hide_log(e, viewer) for e in steps[-1]["logs"]]
-            for s in steps[:-1]:
-                s["logs"] = [_hide_log(e, viewer) for e in s["logs"]]
-        return {"format": "sgs-replay/1", "seed": g.seed, "mode": "duel",
-                "generals": [p.general for p in g.players], "winner": g.winner, "result": g.result, "steps": steps}
+        rep = self.rec.export()
+        viewer = self.human
+        if viewer is not None and not g.over:  # 对战进行中：不把 AI 的手牌和私密日志发给浏览器
+            steps = []
+            for s in rep["steps"]:
+                s = dict(s, state=_hide(s["state"], viewer), logs=[_hide_log(e, viewer) for e in s["logs"]])
+                if s["decision"] and s["decision"]["player"] != viewer:
+                    s["decision"] = dict(s["decision"], options=["（对手的选项不可见）"])
+                    s["chosen"] = None
+                steps.append(s)
+            rep["steps"] = steps
+            rep["hidden_for"] = viewer
+        return rep
 
 
 def _hide(state, viewer):
@@ -66,6 +59,7 @@ def _hide(state, viewer):
         if p["seat"] != viewer:
             p.pop("hand", None)
     st.pop("deck_top", None)
+    st.pop("decision", None)
     return st
 
 

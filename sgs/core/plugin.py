@@ -151,3 +151,7 @@ class Mode:
 
     def is_enemy(self, g, a: int, b: int) -> bool:
         return a != b
+
+    def known_enemy(self, g, viewer: int, other: int) -> bool:
+        """viewer 视角下已知的敌我关系（身份局里不能直接用 is_enemy，因为身份是隐藏的）。"""
+        return self.is_enemy(g, viewer, other)

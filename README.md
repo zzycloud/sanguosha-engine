@@ -5,11 +5,13 @@
 - **标准版规则**：108 张标准牌（含 EX，不含军争），标准包 25 名武将。
 - **开闭原则**：卡牌、技能、武将、牌堆、模式都通过注册表插入，加新内容不用改核心。
 - **状态可拷贝**：结算过程是显式的栈，任意决策点 `clone()` 约 250 微秒；同种子同动作序列结果完全一致。
-- **隐藏信息**：每个玩家的观察不含对手手牌和牌堆顺序；支持 determinize 做不偷看的 rollout。
+- **视角隔离**：AI 只拿到自己的视角快照（`PlayerView`），读不到对手手牌和牌堆顺序；支持 determinize 做不偷看的 rollout。
+- **完整记录**：每次询问都有结果，包括“没有出闪”“没有发动技能”和只有一个选项被自动选掉的决策。
+- **训练数据导出**：批量对局写成 JSONL，每行一个决策点，含玩家视角观察、合法动作、选择、胜负和可选的 rollout 估值。
 - **类 gym 接口**、随机 AI、规则 AI、录像、观察页面、终端/网页对战。
 - **1v1 两人对决**模式先做好，模式是可替换的插件。
 
-设计文档：[docs/design.md](docs/design.md)　规则与已知简化：[docs/rules.md](docs/rules.md)
+设计文档：[docs/design.md](docs/design.md)　规则与已知简化：[docs/rules.md](docs/rules.md)　导出数据格式：[docs/data.md](docs/data.md)
 
 ## 快速开始
 
@@ -37,10 +39,18 @@ python -m sgs.tools.serve --generals 诸葛亮 吕布   # 网页里打，按提�
 python -m sgs.tools.serve --human -1               # 网页里看两个规则 AI 实时对打
 ```
 
+**导出训练数据**（每行一个决策点，字段见 [docs/data.md](docs/data.md)）：
+
+```bash
+python -m sgs.export --games 1000 -o data/duel.jsonl
+python -m sgs.export --games 10000 --workers 8 --no-privileged -o data/big.jsonl.gz
+python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl     # 附每个动作的 rollout 估值
+```
+
 **跑测试和测速**：
 
 ```bash
-python -m pytest                       # 108 个规则单测
+python -m pytest                       # 166 个单测
 python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
 python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```
@@ -49,18 +59,31 @@ python examples/rollout_label.py       # 在一个决策点给每个动作做 ro
 
 ```python
 from sgs.env import SgsEnv
-from sgs.agents import RandomAgent, RuleAgent
+from sgs.agents import RandomAgent, RuleAgent, decide
 
 env = SgsEnv(seed=42, generals=["诸葛亮", "吕布"])   # 也可 pick="random" / pick="choose"
 obs = env.reset()
 agents = [RuleAgent(seed=0), RandomAgent(seed=1)]
 while not env.done:
-    seat = env.current_player
-    d = env.game.pending                     # 当前决策：d.prompt、d.options[i].label / .key
-    obs = env.observe(seat)                  # 只含该玩家能看到的信息
-    action = agents[seat].choose(env.game, d)
+    seat = env.current_player()
+    obs = env.observe(seat)                  # 只含该玩家能看到的信息（JSON 友好的 dict）
+    action = decide(agents[seat], env.game)  # 只把决策者的视角交给 AI
     env.step(action)                         # 动作是 options 的下标
 print(env.rewards())                         # 胜 +1 / 负 -1 / 平 0
+```
+
+自己写 AI：继承 `Agent`，实现 `choose(view, decision)`。`view` 是 `PlayerView`，
+用 `view.hand`、`view.card(id)`、`view.players[i].hp`、`view.is_enemy(i)` 等看局面；看不到的牌会抛错。
+
+```python
+from sgs.agents import Agent
+
+class MyAgent(Agent):
+    def choose(self, view, d):
+        for i, o in enumerate(d.options):      # o.key 是动作编码，o.label 是中文描述
+            if o.label.startswith("使用") and "杀" in o.label:
+                return i
+        return len(d.options) - 1
 ```
 
 rollout：在任意决策点复制状态，换着动作往下打。
@@ -77,9 +100,15 @@ for i, opt in enumerate(g.pending.options):
 
 ## 观察页面
 
-`python -m sgs.replay ... -o out.html` 生成一个自带数据的单文件 HTML，直接用浏览器打开就能逐步回放：
-双方武将、体力、手牌（上帝视角）、装备、判定区、处理区、日志，以及每一步的决策选项和实际选择。
-也可以打开 `web/index.html` 再加载 `-o out.json` 生成的录像文件。方向键前进后退，支持自动播放和调速。
+`python -m sgs.replay ... -o out.html` 生成一个自带数据的单文件 HTML，离线也能打开，逐步回放：
+
+- 双方座位：武将、势力、体力珠、技能（悬停看说明）、四个装备栏、判定区、手牌；
+- 中间台面：回合数、阶段进度、处理区、弃牌堆顶、这一步的关键事件；
+- 右侧：这一步的决策（谁、问什么、所有选项、选了哪个，唯一选项会标出“自动”）和按回合分组的日志，点日志可跳到那一步；
+- 底部：双方体力走势图（点击跳转）、播放控制；方向键前进后退，空格播放；
+- 视角切换：上帝视角，或只看某一方能看到的信息（对手手牌显示为背面，私密日志隐藏）。
+
+也可以打开 `web/index.html` 再加载 `-o out.json` 生成的录像文件。
 
 ## 扩展
 
@@ -122,9 +151,10 @@ register_general("貂蝉", "群", 3, "female", ("离间", "闭月"), pack="stand
 
 | 项目 | 数值 |
 | --- | --- |
-| 随机 vs 随机 | 约 240 局/秒（约 1.4 万决策/秒） |
-| 规则 AI vs 规则 AI | 约 155 局/秒 |
-| 中盘 `clone()` | 约 250 微秒 |
+| 随机 vs 随机 | 约 270 局/秒（约 1.6 万决策/秒） |
+| 规则 AI vs 规则 AI | 约 110 局/秒（每步都要生成视角快照） |
+| 导出 JSONL（规则 AI 对打） | 约 44 局/秒 |
+| 中盘 `clone()` | 约 300 微秒 |
 | 规则 AI 对随机 AI 胜率 | 约 93% |
 
 ## 目录
@@ -135,6 +165,8 @@ sgs/packs/standard/  标准版：牌堆、卡牌、装备、技能、武将
 sgs/modes/           游戏模式（duel = 1v1）
 sgs/agents/          随机 AI、规则 AI
 sgs/env.py           类 gym 接口
+sgs/export.py        批量导出 JSONL
+sgs/rollout.py       rollout 估值
 sgs/replay.py        录像
 sgs/tools/           测速、本地网页对战
 web/index.html       观察页面

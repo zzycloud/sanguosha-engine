@@ -9,29 +9,12 @@
 import argparse
 import os
 import sys
-import random
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from sgs import Game  # noqa: E402
-from sgs.agents import RuleAgent, play_game  # noqa: E402
-
-
-def evaluate(g: Game, rollouts: int, seed: int = 0):
-    d = g.pending
-    me = d.player
-    rng = random.Random(seed)
-    worlds = [g.determinize(me, random.Random(rng.random())) for _ in range(rollouts)]
-    scores = []
-    for i, opt in enumerate(d.options):
-        win = 0.0
-        for k, w in enumerate(worlds):
-            c = w.clone()
-            c.act(i)
-            play_game(c, [RuleAgent(k), RuleAgent(k + 1)])
-            win += 1.0 if c.winner == me else (0.5 if c.winner is None else 0.0)
-        scores.append(win / rollouts)
-    return scores
+from sgs.agents import RuleAgent, decide  # noqa: E402
+from sgs.rollout import evaluate  # noqa: E402
 
 
 def main():
@@ -43,7 +26,7 @@ def main():
     agents = [RuleAgent(1), RuleAgent(2)]
     # 推进到第一个有 3 个以上选项的出牌决策
     while not g.over and not (g.pending.kind == "play" and len(g.pending.options) >= 3):
-        g.act(agents[g.pending.player].choose(g, g.pending))
+        g.act(decide(agents[g.pending.player], g))
     d = g.pending
     print(f"{g.pname(d.player)}：{d.prompt}")
     t = time.perf_counter()

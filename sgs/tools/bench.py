@@ -3,7 +3,7 @@ import argparse
 import random
 import time
 
-from ..agents import RandomAgent, RuleAgent, play_game
+from ..agents import RandomAgent, RuleAgent, decide, play_game
 from ..core.game import Game
 from ..core.registry import GENERALS, load_all
 
@@ -31,7 +31,7 @@ def bench_clone(n=2000):
     for _ in range(40):
         if g.over:
             break
-        g.act(ag[g.pending.player].choose(g, g.pending))
+        g.act(decide(ag[g.pending.player], g))
     t = time.perf_counter()
     for _ in range(n):
         g.clone()

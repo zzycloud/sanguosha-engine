@@ -4,7 +4,7 @@ import random
 import pytest
 
 from sgs import Game
-from sgs.agents.base import RandomAgent, play_game
+from sgs.agents.base import RandomAgent, decide, play_game
 from sgs.testing import blank_game, choose, equip, give, labels, pass_until, stack_deck
 
 
@@ -331,7 +331,7 @@ def test_clone_is_deterministic():
     g = Game(seed=7, generals=["诸葛亮", "司马懿"], auto_single=False)
     ag = [RandomAgent(1), RandomAgent(2)]
     for _ in range(30):
-        g.act(ag[g.pending.player].choose(g, g.pending))
+        g.act(decide(ag[g.pending.player], g))
     c = g.clone()
     seq = []
     rng = random.Random(3)

@@ -1,4 +1,7 @@
-"""简单规则 AI：只看自己的手牌和公开信息，按固定优先级行动。用作基线和冷启动数据来源。"""
+"""简单规则 AI：按固定优先级行动，用作基线和冷启动数据来源。
+
+这里的 g 是 PlayerView（玩家视角快照），不是 Game，所以读不到对手手牌和牌堆。
+"""
 from __future__ import annotations
 
 import random
@@ -17,7 +20,7 @@ PLAY_ORDER = ["equip", "桃", "无中生有", "五谷丰登", "桃园结义", "�
 
 
 def card_value(g, cid) -> float:
-    name = g.cards[cid].name
+    name = g.card(cid).name
     spec = CARDS[name]
     if spec.type == "equip":
         return 4
@@ -58,7 +61,7 @@ class RuleAgent(Agent):
                         if mine <= sum(1 for t in targets if g.is_enemy(me, t) and g.players[t].wounded):
                             continue
                     if name == "决斗":
-                        mine = sum(1 for c in p.hand if g.cards[c].name == "杀")
+                        mine = sum(1 for c in p.hand if g.card(c).name == "杀")
                         if mine == 0:
                             continue
                 if cat not in PLAY_ORDER:
@@ -67,7 +70,7 @@ class RuleAgent(Agent):
                 # 转化牌：尽量用价值低的牌转化
                 if skill:
                     r += 0.5 + sum(card_value(g, c) for c in subs) / 100
-                    if any(g.cards[c].name in ("桃", "无中生有", "无懈可击") for c in subs):
+                    if any(g.card(c).name in ("桃", "无中生有", "无懈可击") for c in subs):
                         continue
             elif k[0] == "skill":
                 if not self._want_skill(g, me, k[1]):
@@ -82,7 +85,7 @@ class RuleAgent(Agent):
     def _want_skill(self, g, me, name):
         p = g.players[me]
         if name == "苦肉":
-            return p.hp >= 3 or any(g.cards[c].name == "桃" for c in p.hand)
+            return p.hp >= 3 or any(g.card(c).name == "桃" for c in p.hand)
         if name in ("青囊", "结姻"):
             return p.wounded
         if name == "仁德":
@@ -125,10 +128,10 @@ class RuleAgent(Agent):
         if good is None:
             return len(d.options) - 1
         want_good = not g.is_enemy(me, seat)
-        if good(g.cards[ctx["judge_card"]]) == want_good:
+        if good(g.card(ctx["judge_card"])) == want_good:
             return len(d.options) - 1
         for i, o in enumerate(d.options):
-            if o.key[0] == "card" and good(g.cards[o.key[1]]) == want_good:
+            if o.key[0] == "card" and good(g.card(o.key[1])) == want_good:
                 return i
         return len(d.options) - 1
 
@@ -159,9 +162,9 @@ class RuleAgent(Agent):
         if reason == "pick_general":
             return self.rng.randrange(len(d.options))
         if reason == "刚烈":
-            return 0 if len(g.players[me].hand) >= 4 else 1
+            return 0 if g.players[me].hand_count >= 4 else 1
         if reason == "雌雄双股剑":
-            return 1 if len(g.players[me].hand) <= 2 else 0
+            return 1 if g.players[me].hand_count <= 2 else 0
         if d.ctx.get("skill") == "遗计":
             return next(i for i, k in enumerate(keys) if k[1] == me)
         if d.ctx.get("skill") == "观星":
@@ -185,8 +188,8 @@ class RuleAgent(Agent):
                 s = 2
             else:
                 cid = k[1]
-                spec = CARDS[g.cards[cid].name]
-                zone = g.locate(cid)[0]
+                spec = CARDS[g.card(cid).name]
+                zone = g.zone_of(cid)[0]
                 if zone == "j":
                     s = 5 if not g.is_enemy(d.player, tgt) else 0
                 elif spec.subtype == "armor":

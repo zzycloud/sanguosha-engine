@@ -16,11 +16,14 @@ sgs/
     plugin.py      扩展点基类：CardSpec、Skill、Mode
     registry.py    注册表：CARDS、SKILLS、GENERALS、MODES、DECKS
     game.py        Game：区域、牌的移动、距离/攻击范围等规则查询、观察、拷贝
+    view.py        玩家视角快照 PlayerView（智能体只能通过它看局面）
     actions.py     通用结算帧：回合、出牌、使用牌、无懈链、响应、伤害、濒死、判定……
   packs/standard/  标准版扩展包：牌堆、基本牌、锦囊、装备、25 名武将的技能
   modes/duel.py    1v1 两人对决模式
   agents/          随机 AI、规则 AI
   env.py           类 gym 接口
+  export.py        批量导出 JSONL 训练数据（docs/data.md）
+  rollout.py       rollout 估值
   replay.py        录像（JSON / 自带查看器的单文件 HTML）
   tools/           测速、本地网页对战
   testing.py       写单测用的局面构造工具
@@ -50,7 +53,7 @@ class DuelFrame(Frame):
 - `g.ask(decision)`：请求玩家决策，`g.act(i)` 之后下次 step 用 `g.answer()` 取选项；
 - `g.done(result)`：结束当前帧。
 
-状态里只有列表、字典、整数和这些小对象，没有闭包和 lambda，`pickle` 一次中盘状态约 250 微秒。
+状态里只有列表、字典、整数和这些小对象，没有闭包和 lambda，`pickle` 一次中盘状态约 300 微秒。
 
 ## 事件与触发
 
@@ -133,11 +136,27 @@ register_general("貂蝉", "群", 3, "female", ("离间", "闭月"), pack="stand
 
 `Game(auto_single=True)`（默认）会自动跳过只有一个选项的决策，rollout 更快；写测试时用 `"responses"`，只自动跳过响应类决策。
 
-## 隐藏信息
+## 视角隔离与隐藏信息
 
-- `g.observe(seat)` 只给该玩家自己的手牌，对手只有手牌数；牌堆只有张数。`observe(None)` 是上帝视角。
-- 日志每条有公开文本，私密部分（摸到什么牌）放在 `private[seat]` 里，`visible_logs(seat)` 按视角过滤。
-- `g.determinize(seat, rng)`：复制一份并把该玩家看不到的牌（对手手牌 + 牌堆）随机重新分配，用于不偷看信息的 rollout。
+- **智能体只拿视角快照**：引擎通过 `decide(agent, g)` 调用智能体，传给它的是 `g.view(seat)` 生成的 `PlayerView`
+  （`sgs/core/view.py`）。它是决策点的快照，内部没有 `Game` 的引用，所以拿不到对手手牌、牌堆顺序或别人的私密日志；
+  用 `view.card(id)` 查看不见的牌会抛 `HiddenCardError`。能看见的牌：自己的手牌，所有人的装备区、判定区，
+  处理区、弃牌堆，以及当前决策选项里给出的牌（观星看到的牌堆顶、五谷丰登亮出的牌、鬼才要改的判定牌）。
+- `g.observe(seat)` 是同一份视角的 JSON 版本；`observe(None)` 是上帝视角。其他玩家此刻在做什么决策不会出现在观察里，
+  免得从“被问要不要出无懈可击”推断出对手有这张牌。
+- 日志每条有公开文本，私密部分（摸到什么牌、为什么没出闪）放在 `private[seat]` 里，`visible_logs(seat)` 按视角过滤；
+  只有私密部分的条目（例如“你没有使用无懈可击”）对别人完全不可见。
+- `g.determinize(seat, rng)`：复制一份并把该玩家看不到的牌（对手手牌 + 牌堆）随机重新分配，用于不偷看信息的 rollout
+  （`sgs/rollout.py`）。
+- 身份局这类敌我关系本身隐藏的模式，要实现 `Mode.known_enemy(g, viewer, other)`，视角只用它。
+
+## 完整记录
+
+- **每次询问都有结果日志**：出牌、响应、发动技能之外，“没有使用闪”“没有打出杀”“没有发动【鬼才】”“无懈可击结算完毕，某牌被抵消/仍然生效”、
+  阶段开始与结束、回合结束时的手牌数和体力都会写日志。没出闪的公开文本对所有人一样，原因（没有可用的牌 / 选择不出）只写在决策者的私密部分。
+- **每个决策都有记录**：`g.decisions` 记下每个已完成的决策，包括只有一个选项、被 `auto_single` 自动选掉的，
+  字段有决策者、类型、提示、全部选项（编码和描述）、选了哪个、是否自动、对应日志位置。
+- 录像用 `auto_single=False` 跑，所以唯一选项的决策也会单独成为一步；导出工具加 `--include-auto` 也会写出这些行。
 
 ## 确定性与性能
 
@@ -147,10 +166,10 @@ register_general("貂蝉", "群", 3, "female", ("离间", "闭月"), pack="stand
 
 | 项目 | 数值 |
 | --- | --- |
-| 随机 vs 随机（关闭日志） | 约 240 局/秒，约 1.4 万决策/秒 |
-| 规则 AI vs 规则 AI | 约 155 局/秒 |
-| 中盘状态 `clone()` | 约 250 微秒 |
-| 从中盘拷贝后随机打完 | 约 690 局/秒 |
+| 随机 vs 随机（关闭日志） | 约 270 局/秒，约 1.6 万决策/秒 |
+| 规则 AI vs 规则 AI | 约 110 局/秒（每个决策生成一次视角快照） |
+| 中盘状态 `clone()` | 约 300 微秒 |
+| 从中盘拷贝后随机打完 | 约 740 局/秒 |
 | 规则 AI 对随机 AI 胜率 | 约 93%（双方先后手各测一半） |
 
 纯 Python，多进程并行可以线性扩展。以后如果需要更快，可以把热点（选项生成、技能查询）缓存或用 Cython 重写，接口不变。

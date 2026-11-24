@@ -6,3 +6,4 @@ build/
 dist/
 replay*.html
 replay*.json
+data/

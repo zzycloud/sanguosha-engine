@@ -89,6 +89,8 @@ class Game:
         self.logs: List[Dict[str, Any]] = []
         self.auto_single = auto_single
         self.history: List[int] = []
+        # 每个已完成的决策（含自动跳过的单选项决策），只在 log=True 时记录
+        self.decisions: List[Dict[str, Any]] = []
         self.steps = 0
         self.queued: List[int] = []  # 失去牌后待触发 lose_card 事件的座位
         self.mode.setup(self)
@@ -108,6 +110,8 @@ class Game:
             raise RuntimeError(f"没有选项的决策: {d}")
         # auto_single=True：只有一个选项的决策自动选择；"responses"：出牌阶段除外（便于写测试）
         if self.auto_single and len(d.options) == 1 and (self.auto_single is True or d.kind != "play"):
+            if self.logging:
+                self._record_decision(d, 0, True)
             self._answer = d.options[0]
             return
         self.pending = d
@@ -143,9 +147,19 @@ class Game:
         if not 0 <= index < len(d.options):
             raise IndexError(f"选项越界: {index} / {len(d.options)}")
         self.history.append(index)
+        if self.logging:
+            self._record_decision(d, index, False)
         self._answer = d.options[index]
         self.pending = None
         self.run()
+
+    def _record_decision(self, d: Decision, index: int, auto: bool) -> None:
+        self.decisions.append({
+            "i": len(self.decisions), "log_i": len(self.logs), "turn": self.turn_count, "phase": self.phase,
+            "player": d.player, "kind": d.kind, "prompt": d.prompt,
+            "options": [{"key": _plain(o.key), "label": o.label} for o in d.options],
+            "ctx": _plain(d.ctx), "chosen": index, "auto": auto,
+        })
 
     def act_key(self, key: Tuple) -> None:
         for i, o in enumerate(self.pending.options):
@@ -445,7 +459,19 @@ class Game:
         return d
 
     def observe(self, viewer: Optional[int]) -> Dict[str, Any]:
-        """viewer 视角下的观察（隐藏他人手牌和牌堆顺序）。viewer=None 为上帝视角。"""
+        """viewer 视角下的观察（JSON 友好）。viewer=None 为上帝视角。
+
+        玩家视角来自 PlayerView：看不到对手手牌、牌堆顺序；当前决策只有决策者本人能看到，
+        其他人也不知道此刻在等谁（避免从“被询问无懈可击”推断出手牌）。
+        """
+        if viewer is not None:
+            obs = self.view(viewer, derived=True).to_dict()
+            obs["over"], obs["winner"] = self.over, self.winner
+            d = self.pending
+            if d is not None and d.player == viewer:
+                obs["decision"] = {"player": d.player, "kind": d.kind, "prompt": d.prompt,
+                                   "options": [o.label for o in d.options], "ctx": _plain(d.ctx)}
+            return obs
         obs = {
             "viewer": viewer,
             "turn": self.turn_count, "current": self.current, "phase": self.phase,
@@ -456,27 +482,25 @@ class Game:
             "processing": [self.card_dict(c) for c in self.processing],
             "over": self.over, "winner": self.winner,
         }
-        if viewer is None:
-            obs["deck_top"] = [self.card_dict(c) for c in reversed(self.deck[-5:])]
+        obs["deck_top"] = [self.card_dict(c) for c in reversed(self.deck[-5:])]
         d = self.pending
-        if d is not None and (viewer is None or d.player == viewer):
+        if d is not None:
             obs["decision"] = {"player": d.player, "kind": d.kind, "prompt": d.prompt,
                                "options": [o.label for o in d.options], "ctx": _plain(d.ctx)}
-        elif d is not None:
-            obs["waiting_for"] = d.player
         return obs
+
+    def view(self, viewer: int, with_logs: bool = False, derived: bool = False):
+        """viewer 的视角快照（不含 Game 引用）。智能体只应通过它看对局。
+        derived=True 时额外计算距离、攻击范围、杀的次数上限、手牌上限。"""
+        from .view import PlayerView
+        return PlayerView(self, viewer, with_logs, derived)
 
     def visible_logs(self, viewer: Optional[int], since: int = 0) -> List[str]:
         out = []
         for e in self.logs[since:]:
-            text = e["text"]
-            priv = e.get("private")
-            if priv:
-                if viewer is None:
-                    text += "：" + "；".join(priv.values())
-                elif viewer in priv:
-                    text += "：" + priv[viewer]
-            out.append(text)
+            t = log_text(e, viewer)
+            if t is not None:
+                out.append(t)
         return out
 
     def determinize(self, viewer: int, rng: Optional[random.Random] = None) -> "Game":
@@ -497,6 +521,25 @@ class Game:
         g.deck = unknown
         g.rng = random.Random(rng.random())
         return g
+
+
+def log_text(e: Dict[str, Any], viewer: Optional[int]) -> Optional[str]:
+    """一条日志在 viewer 视角下的文本；看不到的返回 None。viewer=None 为上帝视角。"""
+    text = e["text"]
+    priv = e.get("private")
+    extra = None
+    if priv:
+        if viewer is None:
+            vals = []
+            for v in priv.values():
+                if v not in vals:
+                    vals.append(v)
+            extra = "；".join(vals)
+        elif viewer in priv:
+            extra = priv[viewer]
+    if not text:
+        return extra
+    return f"{text}：{extra}" if extra else text
 
 
 def _plain(x):
