@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三国杀对局观察</title>
+<style>
+:root {
+  --bg: #f6f3ec; --panel: #fffdf8; --ink: #22201c; --muted: #6f685d; --line: #ddd5c6;
+  --accent: #9b2c1f; --accent-soft: #f3e2dc; --red: #c0392b; --black: #222; --gold: #b7862b;
+  --card: #fffaf0; --hl: #fff1c2;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #18171a; --panel: #222126; --ink: #ece8e1; --muted: #a39c90; --line: #3a3840;
+    --accent: #e0745f; --accent-soft: #3a2723; --red: #ff7b6b; --black: #ece8e1; --gold: #d9a84a;
+    --card: #2b2a30; --hl: #4a4128;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #18171a; --panel: #222126; --ink: #ece8e1; --muted: #a39c90; --line: #3a3840;
+  --accent: #e0745f; --accent-soft: #3a2723; --red: #ff7b6b; --black: #ece8e1; --gold: #d9a84a;
+  --card: #2b2a30; --hl: #4a4128;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.5 "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px;
+  border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 17px; margin: 0 8px 0 0; letter-spacing: 1px; }
+header .meta { color: var(--muted); }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; padding: 16px; max-width: 1280px; margin: 0 auto; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.player { display: grid; gap: 8px; }
+.player.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.player.dead { opacity: .55; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.name { font-size: 18px; font-weight: 700; }
+.kingdom { font-size: 12px; padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.hp { color: var(--red); letter-spacing: 1px; }
+.hp .lost { color: var(--line); }
+.skill { font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; color: var(--muted); }
+.label { color: var(--muted); font-size: 12px; min-width: 40px; }
+.cards { display: flex; flex-wrap: wrap; gap: 6px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; font-size: 13px; white-space: nowrap; }
+.card.red .s { color: var(--red); } .card.black .s { color: var(--black); }
+.card .r { color: var(--muted); margin-right: 3px; font-variant-numeric: tabular-nums; }
+.empty { color: var(--muted); font-size: 12px; }
+.center { display: grid; gap: 8px; margin: 12px 0; }
+.stats { display: flex; gap: 18px; color: var(--muted); flex-wrap: wrap; }
+.stats b { color: var(--ink); }
+.decision { border-left: 3px solid var(--accent); }
+.decision ol { margin: 6px 0 0; padding-left: 22px; }
+.decision li { padding: 1px 4px; border-radius: 4px; }
+.decision li.chosen { background: var(--hl); font-weight: 600; }
+.decision li.clickable { cursor: pointer; }
+.decision li.clickable:hover { background: var(--accent-soft); }
+.log { max-height: 70vh; overflow: auto; font-size: 13px; }
+.log div { padding: 2px 0; border-bottom: 1px dashed var(--line); }
+.log div.new { background: var(--hl); }
+.log div.turn { font-weight: 700; color: var(--accent); border-bottom: none; padding-top: 8px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select, input[type=file] { font: inherit; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+button:hover { border-color: var(--accent); }
+input[type=range] { flex: 1; min-width: 160px; accent-color: var(--accent); }
+.winner { color: var(--gold); font-weight: 700; }
+#drop { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>三国杀对局观察</h1>
+  <span class="meta" id="meta">未加载录像</span>
+  <span style="flex:1"></span>
+  <input type="file" id="file" accept=".json">
+  <button id="theme" title="切换明暗">◐</button>
+</header>
+<main>
+  <section>
+    <div class="panel player" id="p1"></div>
+    <div class="center">
+      <div class="panel">
+        <div class="stats" id="stats"></div>
+        <div class="row" style="margin-top:6px"><span class="label">处理区</span><div class="cards" id="processing"></div></div>
+        <div class="row" style="margin-top:4px"><span class="label">弃牌堆</span><div class="cards" id="discard"></div></div>
+      </div>
+      <div class="panel decision" id="decision"></div>
+      <div class="panel controls">
+        <button id="first">⏮</button><button id="prev">◀</button>
+        <button id="play">▶ 播放</button><button id="next">▶|</button><button id="last">⏭</button>
+        <select id="speed"><option value="1200">慢</option><option value="500" selected>中</option><option value="120">快</option></select>
+        <input type="range" id="slider" min="0" max="0" value="0">
+        <span id="pos" class="meta"></span>
+      </div>
+    </div>
+    <div class="panel player" id="p0"></div>
+  </section>
+  <aside class="panel">
+    <div class="row" style="justify-content:space-between"><b>对局日志</b><span class="meta" id="logcount"></span></div>
+    <div class="log" id="log"></div>
+  </aside>
+</main>
+<script id="embedded-replay" type="application/json"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let rep = null, idx = 0, timer = null, live = null;
+  const SLOT = { weapon: "武器", armor: "防具", plus_horse: "+1马", minus_horse: "-1马" };
+  const PHASE = { start: "回合开始", prepare: "准备阶段", judge: "判定阶段", draw: "摸牌阶段", play: "出牌阶段",
+    discard: "弃牌阶段", finish: "结束阶段", "": "" };
+
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function card(c, extra) {
+    const color = (c.suit === "♥" || c.suit === "♦") ? "red" : "black";
+    return `<span class="card ${color}"><span class="s">${c.suit}</span><span class="r">${esc(c.rank)}</span>${esc(c.name)}${extra ? ` <span class="r">${esc(extra)}</span>` : ""}</span>`;
+  }
+  const cards = (list, empty = "无") => list && list.length ? list.map((c) => card(c)).join("") : `<span class="empty">${empty}</span>`;
+
+  function renderPlayer(el, p, state) {
+    const hearts = "♥".repeat(Math.max(0, p.hp)) + `<span class="lost">${"♥".repeat(Math.max(0, p.max_hp - Math.max(0, p.hp)))}</span>`;
+    const eq = Object.entries(p.equips).map(([s, c]) => card(c, SLOT[s])).join("") || '<span class="empty">无</span>';
+    const jd = p.judges.map((c) => card(c, c.as_name !== c.name ? "当" + c.as_name : "")).join("") || '<span class="empty">无</span>';
+    const hand = p.hand ? cards(p.hand, "没有手牌") : `<span class="empty">${p.hand_count} 张（隐藏）</span>`;
+    el.className = "panel player" + (state.current === p.seat ? " active" : "") + (p.alive ? "" : " dead");
+    el.innerHTML = `
+      <div class="row"><span class="name">${esc(p.general || "?")}</span><span class="kingdom">${esc(p.kingdom)}</span>
+        <span class="hp">${hearts}</span><span class="meta">${p.hp}/${p.max_hp}　${p.seat} 号位${p.alive ? "" : "（阵亡）"}</span>
+        ${p.skills.map((s) => `<span class="skill">${esc(s)}</span>`).join("")}</div>
+      <div class="row"><span class="label">手牌</span><div class="cards">${hand}</div></div>
+      <div class="row"><span class="label">装备</span><div class="cards">${eq}</div></div>
+      <div class="row"><span class="label">判定</span><div class="cards">${jd}</div></div>`;
+  }
+
+  function render() {
+    if (!rep) return;
+    const step = rep.steps[idx], st = step.state;
+    renderPlayer($("p0"), st.players[0], st);
+    renderPlayer($("p1"), st.players[1], st);
+    const top = (st.deck_top || []).map((c) => card(c)).join("");
+    $("stats").innerHTML = `<span>第 <b>${st.turn}</b> 回合</span><span>当前：<b>${esc(st.players[st.current].general)}</b> ${PHASE[st.phase] || st.phase}</span>
+      <span>牌堆 <b>${st.deck_count}</b></span><span>弃牌 <b>${st.discard_count}</b></span>${top ? `<span>牌堆顶：${top}</span>` : ""}`;
+    $("processing").innerHTML = cards(st.processing);
+    $("discard").innerHTML = cards((st.discard || []).slice(-8).reverse());
+    const d = step.decision;
+    if (d) {
+      const who = esc(st.players[d.player].general);
+      const clickable = live && live.human === d.player;
+      $("decision").innerHTML = `<b>${who}</b> 决策（${esc(d.kind)}）：${esc(d.prompt)}<ol>${d.options.map((o, i) =>
+        `<li data-i="${i}" class="${i === step.chosen ? "chosen" : ""}${clickable ? " clickable" : ""}">${esc(o)}</li>`).join("")}</ol>`;
+      if (clickable) $("decision").querySelectorAll("li").forEach((li) => li.onclick = () => liveAct(+li.dataset.i));
+    } else {
+      const w = rep.winner === null || rep.winner === undefined ? "平局" : `${esc(st.players[rep.winner].general)} 获胜`;
+      $("decision").innerHTML = `<span class="winner">${esc(rep.result || w)}</span>`;
+    }
+    // 日志：累计到当前步
+    let html = "", n = 0;
+    for (let k = 0; k <= idx; k++) {
+      for (const e of rep.steps[k].logs) {
+        const priv = e.private ? "：" + Object.values(e.private).join("；") : "";
+        html += `<div class="${e.kind === "turn" ? "turn" : ""}${k === idx ? " new" : ""}">${esc(e.text + priv)}</div>`;
+        n++;
+      }
+    }
+    $("log").innerHTML = html;
+    $("log").scrollTop = $("log").scrollHeight;
+    $("logcount").textContent = `${n} 条`;
+    $("slider").max = rep.steps.length - 1;
+    $("slider").value = idx;
+    $("pos").textContent = `${idx + 1} / ${rep.steps.length}`;
+  }
+
+  function load(r) {
+    rep = r; idx = 0;
+    $("meta").textContent = `${r.generals.join(" vs ")}　种子 ${r.seed}　${r.result || ""}`;
+    render();
+  }
+  const go = (i) => { if (!rep) return; idx = Math.max(0, Math.min(rep.steps.length - 1, i)); render(); };
+  $("first").onclick = () => go(0);
+  $("last").onclick = () => go(rep.steps.length - 1);
+  $("prev").onclick = () => go(idx - 1);
+  $("next").onclick = () => go(idx + 1);
+  $("slider").oninput = (e) => go(+e.target.value);
+  $("play").onclick = () => {
+    if (timer) { clearInterval(timer); timer = null; $("play").textContent = "▶ 播放"; return; }
+    $("play").textContent = "⏸ 暂停";
+    timer = setInterval(() => { if (idx >= rep.steps.length - 1) { $("play").click(); } else go(idx + 1); }, +$("speed").value);
+  };
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") go(idx + 1);
+    if (e.key === "ArrowLeft") go(idx - 1);
+  });
+  $("file").onchange = async (e) => { const f = e.target.files[0]; if (f) load(JSON.parse(await f.text())); };
+  $("theme").onclick = () => {
+    const r = document.documentElement, dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const cur = r.dataset.theme || (dark ? "dark" : "light");
+    r.dataset.theme = cur === "dark" ? "light" : "dark";
+  };
+
+  // ---- 实时模式（python -m sgs.tools.serve 提供 /api）----
+  async function api(path, body) {
+    const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+    return res.json();
+  }
+  async function liveRefresh() { load(await api("/api/replay")); go(rep.steps.length - 1); }
+  async function liveAct(i) { await api("/api/act", { index: i }); await liveRefresh(); }
+  window.sgsLive = { refresh: liveRefresh, act: liveAct };
+
+  const emb = $("embedded-replay").textContent.trim();
+  const params = new URLSearchParams(location.search);
+  if (emb) load(JSON.parse(emb));
+  else if (params.get("live")) {
+    live = { human: params.get("human") === null ? null : +params.get("human") };
+    const b = document.createElement("button");
+    b.textContent = "新一局";
+    b.onclick = async () => { await api("/api/new"); await liveRefresh(); };
+    $("file").replaceWith(b);
+    liveRefresh();
+  }
+  else if (params.get("src")) fetch(params.get("src")).then((r) => r.json()).then(load);
+  else $("meta").textContent = "选择一个录像 JSON 文件，或用 python -m sgs.replay 生成自带录像的 HTML";
+})();
+</script>
+</body>
+</html>
