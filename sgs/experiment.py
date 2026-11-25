@@ -8,11 +8,22 @@
     name: compare-prompts
     dir: runs/{name}-{time}        # 总输出目录；每个变体一个子目录
     base:                          # 和普通对战配置一样（match / players / output），每个变体在它上面覆盖
-      match: {games: 100, swap: true}
-      players: {A: {include: models/qwen-local.yaml}, B: rule}
-    variants:                      # 按顺序一个一个跑
-      old: {players: {A: {prompt: default}}}
-      new: {players: {A: {prompt: v2}}}
+      match:
+        games: 100
+        swap: true
+      players:
+        A:
+          include: models/qwen-local.yaml
+        B: rule
+    variants:                      # 按顺序一个一个跑，每个只写和 base 不一样的地方
+      old:
+        players:
+          A:
+            prompt: default
+      new:
+        players:
+          A:
+            prompt: v2
     side: A                        # 比哪一方的数据（默认 A）
 
 输出：每个变体的目录（和 sgs.arena 一样，有 index.html），总目录里的 comparison.json / comparison.md，终端打印对比表。

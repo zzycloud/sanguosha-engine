@@ -148,7 +148,7 @@ def test_experiment_runs_four_groups(srv, tmp_path):
                  sets=[f"base.players.A.base_url={srv.url}", f"dir={tmp_path}/exp"])
     res = E.run(exp)
     rows = {r["variant"]: r for r in res["rows"]}
-    assert set(rows) == {"none", "tips", "cot", "both", "reason"}
+    assert set(rows) == {"none", "tips", "cot", "both"}
     assert rows["none"]["cot_decisions"] == 0 and rows["cot"]["cot_decisions"] > 0
     assert rows["tips"]["avg_prompt_tokens"] > rows["none"]["avg_prompt_tokens"]
     md = open(os.path.join(res["dir"], "comparison.md"), encoding="utf-8").read()
@@ -156,10 +156,7 @@ def test_experiment_runs_four_groups(srv, tmp_path):
     calls = json.load(open(os.path.join(res["dir"], "cot", "games", "0001", "llm_calls.json"), encoding="utf-8"))
     assert any(c.get("analysis") for c in calls)
     assert "分析超长 / 截断" in md
-    rc = json.load(open(os.path.join(res["dir"], "reason", "games", "0001", "llm_calls.json"), encoding="utf-8"))
-    hit = [c for c in rc if c.get("cot")]
-    assert hit and all(c["cot_source"] == "reasoning" and c["analysis"] for c in hit)
-    assert all(c["attempts"][-1]["request"].get("reasoning_effort") == "low" for c in rc)
+    assert all(c["cot_source"] == "content" for c in calls if c.get("cot"))
 
 
 def test_real_experiment_config_loads():
@@ -167,8 +164,27 @@ def test_real_experiment_config_loads():
     exp = E.load(os.path.join("configs", "compare-tips-cot.yaml"))
     assert list(exp["_configs"]) == ["none", "tips", "cot", "both"]
     a = exp["_configs"]["both"]["players"]["A"]
-    assert a["cot"] == "key" and a["tips"]["self"] is True
-    assert exp["_configs"]["none"]["players"]["A"]["cot"] == "off"
+    assert a["cot"] == "key" and a["tips"] is True
+    assert a["reasoning_effort"] == "low" and a["api_key_env"] == "STEPFUN_API_KEY"   # 来自模型文件
+    assert "cot" not in exp["_configs"]["none"]["players"]["A"]
+    assert exp["_configs"]["none"]["players"]["B"] in ("rule", {"agent": "rule"})
+
+
+def test_no_inline_braces_in_configs():
+    import glob
+    import re
+    for f in glob.glob(os.path.join("configs", "**", "*.yaml"), recursive=True):
+        for n, line in enumerate(open(f, encoding="utf-8"), 1):
+            body = line.split("#", 1)[0] if not line.lstrip().startswith("#") else line.lstrip()[1:]
+            body = re.sub(r"\{(name|time)\}", "", body)
+            assert not re.search(r":\s*\{", body), f"{f}:{n} 用了花括号写法：{line.strip()}"
+
+
+def test_model_files_load():
+    from sgs import config as C
+    for f in ("step-5-preview.yaml", "qwen-local.yaml", "fake.yaml"):
+        p = C.resolve_player("A", {"include": f"models/{f}"}, "configs")
+        assert p["agent"] == "llm" and p["model"] and p["base_url"]
 
 
 # ------------------------------------------------------------------ 分析长度控制
@@ -250,6 +266,7 @@ def test_to_cot_messages_rewrites_plain_prompt():
 
 # ------------------------------------------------------------------ 导出
 def _play(srv, tmp_path, name, **players):
+    # 假模型的四组对比；players 里的项覆盖 A 的设置（例如 model=fake-cot-wordy）
     from sgs import experiment as E
     exp = E.load(os.path.join("configs", "compare-tips-cot-fake.yaml"),
                  sets=[f"base.players.A.base_url={srv.url}", f"dir={tmp_path}/{name}", "base.match.games=2"]
@@ -279,8 +296,8 @@ def test_export_drop_and_compress(srv, tmp_path):
 
 
 def test_export_from_reasoning(srv, tmp_path):
-    d = _play(srv, tmp_path, "reason")
-    res = _export(os.path.join(d, "reason"), tmp_path, srv, drop_tips=True)
+    d = _play(srv, tmp_path, "reason", model="fake-reason", cot_source="reasoning")
+    res = _export(os.path.join(d, "both"), tmp_path, srv, drop_tips=True)
     assert res["kept"] > 0 and res["counts"].get("compressed") == res["kept"]
     rows = [json.loads(x) for x in open(os.path.join(res["dir"], "sft.jsonl"), encoding="utf-8")]
     for r in rows:
@@ -290,7 +307,7 @@ def test_export_from_reasoning(srv, tmp_path):
         assert "先分析，再给编号" in r["messages"][-2]["content"]   # 提示词换成三行格式
     # 压缩模型压不好就丢掉
     from sgs_data import cot_export as X
-    cfg = X.load(data={"runs": [os.path.join(d, "reason")], "out": str(tmp_path / "bad"),
+    cfg = X.load(data={"runs": [os.path.join(d, "both")], "out": str(tmp_path / "bad"),
                        "compressor": {"agent": "llm", "base_url": srv.url, "model": "fake-cot-wordy"}})
     res = X.run(cfg)
     assert res["kept"] == 0 and res["counts"].get("compress_failed", 0) > 0
@@ -299,8 +316,8 @@ def test_export_from_reasoning(srv, tmp_path):
 def test_export_needs_compressor_for_reasoning(srv, tmp_path):
     from sgs import config as C
     from sgs_data import cot_export as X
-    d = _play(srv, tmp_path, "reason2")
-    cfg = X.load(data={"runs": [os.path.join(d, "reason")], "out": str(tmp_path / "x")})
+    d = _play(srv, tmp_path, "reason2", model="fake-reason", cot_source="reasoning")
+    cfg = X.load(data={"runs": [os.path.join(d, "both")], "out": str(tmp_path / "x")})
     with pytest.raises(C.ConfigError):
         X.run(cfg)
 

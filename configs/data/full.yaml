@@ -1,6 +1,6 @@
 # 造数据：正式跑。模拟用规则 AI（快、免费），你的强模型当裁判（每题问 5 次）。
 #
-#   export MY_API_KEY=sk-...                 # 强模型的密钥只放环境变量
+#   export STEPFUN_API_KEY=你的密钥           # 强模型的密钥只放环境变量
 #   python -m sgs_data configs/data/full.yaml
 #
 # 先用 --set key.scenarios.guojia_sell_hp=20 之类的小数跑一遍，看 stats.md 里每类题留下多少、review.md 里答案对不对，再放大。
@@ -11,11 +11,14 @@ workers: 8
 
 prompt:
   name: v2
-  args: {recent_turns: 2}
+  args:
+    recent_turns: 2
 
 rollout:
   policy: rule+
-  # policy: {include: ../models/qwen-local.yaml, temperature: 0.7}   # 用你的模型往下打（慢）
+  # policy:                        # 用你的模型往下打（慢）
+  #   include: ../models/qwen-local.yaml
+  #   temperature: 0.7
   # max_turns_ahead: 4                                               # 配合模型模拟：只往下打 4 个回合，之后按体力手牌粗估
   n_min: 32
   n_max: 128
@@ -33,7 +36,9 @@ key:
     #                           # 换更强的模拟者后再打开
     zhenji_discard: 600
   test_per_scenario: 40
-  test_rollout: {n_min: 64, n_max: 256}
+  test_rollout:
+    n_min: 64
+    n_max: 256
 
 normal:
   games: 1500
@@ -41,12 +46,17 @@ normal:
   players:
     A: rule+
     B: rule+
-    # A: {include: ../models/qwen-local.yaml}    # 用你的模型打这些局，抽到的局面更像它真会遇到的
-  rollout: {n_min: 16, n_max: 64}
+    # A:                        # 用你的模型打这些局，抽到的局面更像它真会遇到的
+    #   include: ../models/qwen-local.yaml
+  rollout:
+    n_min: 16
+    n_max: 64
 
 judge:                        # 强模型当裁判：和模拟结论不一致的题不进训练，写进 review.md
   enabled: true
-  player: {include: ../models/strong-api.yaml}
+  player:
+    include: ../models/step-5-preview.yaml
+    temperature: 0.7          # 裁判要投好几票，留一点随机性
   votes: 5
   scope: confident            # 只问模拟有结论的题（all：全问）
   on_disagree: review

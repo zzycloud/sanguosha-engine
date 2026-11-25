@@ -1,19 +1,54 @@
-# 不花钱的试跑：同样四组，模型换成假模型，只看流程通不通、输出长什么样。
-#   uv run python -m sgs.tools.fake_llm --port 8001        # 另一个终端先起假模型
-#   uv run python -m sgs.experiment configs/compare-tips-cot-fake.yaml
+# 和 compare-tips-cot.yaml 一样的四组，模型换成本地假模型：不花钱，只看流程通不通、输出长什么样。
+#
+# 怎么跑（两个终端）：
+#   uv run python -m sgs.tools.fake_llm --port 8001                    # 终端 1：起假模型，开着别关
+#   uv run python -m sgs.experiment configs/compare-tips-cot-fake.yaml  # 终端 2
+#
+# 和正式版只差两处：A 用 models/fake.yaml，每组只打 2 局。
+
 name: compare-tips-cot-fake
 dir: runs/{name}-{time}
 side: A
+
 base:
-  match: {games: 2, seed: 0, swap: true, concurrency: 2, general_pool: [郭嘉, 诸葛亮, 司马懿, 甄姬]}
+  match:
+    games: 2
+    seed: 0
+    swap: true
+    concurrency: 2
+    general_pool:
+      - 郭嘉
+      - 诸葛亮
+      - 司马懿
+      - 甄姬
   players:
-    A: {agent: llm, base_url: "http://127.0.0.1:8001/v1", model: fake-cot, prompt: v2, tips: false, cot: "off"}
+    A:
+      include: models/fake.yaml
+      prompt: v2
+      cot_max_chars: 80
     B: rule
-  output: {replays: all, connect_check: true}
+  output:
+    replays: all
+    connect_check: true          # 开打前先试连一次，假模型没起会直接告诉你
+
 variants:
-  none: {players: {A: {label: 无技巧无分析}}}
-  tips: {players: {A: {label: 技巧, tips: true}}}
-  cot: {players: {A: {label: 关键分析, cot: key}}}
-  both: {players: {A: {label: 技巧加关键分析, tips: true, cot: key}}}
-  # 推理模型的样子：思考在 reasoning 字段里，回答只有编号
-  reason: {players: {A: {label: 思考字段, model: fake-reason, tips: true, cot: key, cot_source: reasoning, reasoning_effort: low}}}
+  none:
+    players:
+      A:
+        label: 无技巧无分析
+  tips:
+    players:
+      A:
+        label: 技巧
+        tips: true
+  cot:
+    players:
+      A:
+        label: 关键分析
+        cot: key
+  both:
+    players:
+      A:
+        label: 技巧加关键分析
+        tips: true
+        cot: key

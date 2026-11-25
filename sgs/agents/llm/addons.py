@@ -2,18 +2,21 @@
 
     players:
       A:
-        include: models/strong-api.yaml
+        include: models/step-5-preview.yaml
         prompt: v2
         tips: true                 # 注入自己武将的技巧（configs/tips/武将名.md）
-        # tips: {dir: configs/tips, self: true, opponent: true}   # 对手武将的技巧也注入（默认不注入）
-        cot: key                   # off（默认）/ key（只在关键决策先分析）/ all（每个决策都先分析）
-        cot_max_chars: 80          # 分析三行加起来最多多少字（去掉空白后的字数，含“局面：”这些标签）
-        cot_source: content        # 分析从哪来：content（默认，要求模型在回答里先写三行短分析）
-                                   #   / reasoning（推理模型用：提示词不变，只要编号；模型自己的思考字段
-                                   #     reasoning / reasoning_content 原样记下，导出数据时再压缩成三行）
-        cot_max_tokens: null       # 需要分析的请求单独的 max_tokens；默认不另设（用 max_tokens）。
-                                   #   推理模型的思考可能也算在 max_tokens 里，别设小；普通模型可以写 auto（= 字数上限 × 2 + 60）
-        cot_retries: 1             # 分析的回复解析不出编号（多半是太长被截断）时重答几次，再不行交给兜底 AI
+        cot: key                   # off（默认）/ key（只在关键决策先写三行短分析）/ all（每个决策都写）
+        cot_max_chars: 80          # 三行分析加起来最多多少字（去掉空白后的字数，含“局面：”这些标签）
+
+不常用的（都有默认值，一般不用写）：
+    tips:                      # 写成一段时：对手武将的技巧也注入（默认不注入）
+      dir: configs/tips
+      self: true
+      opponent: true
+    cot_retries: 1             # 分析的回复解析不出编号（多半是被截断）时重答几次，再不行交给兜底 AI
+    cot_max_tokens: null       # 需要分析的请求单独的 max_tokens；auto = 字数上限 × 2 + 60（推理模型别设小）
+    cot_source: content        # content：回答里先写三行再给编号（默认，也是推荐用法）；
+                               # reasoning：实验用，提示词不变，把推理模型的思考字段原文记下来，导出时再压缩
 
 实现方式：TipsCoTPrompt 包在任何一个提示词模板（default、v2 或你自己的）外面，只改三处：
   1. system 末尾的输出格式说明前面，插入技巧段落；

@@ -255,7 +255,7 @@ from sgs.arena import run_config  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-@pytest.mark.parametrize("name", sorted(os.listdir(os.path.join(ROOT, "configs"))))
+@pytest.mark.parametrize("name", sorted(n for n in os.listdir(os.path.join(ROOT, "configs")) if n.endswith((".yaml", ".yml", ".json"))))
 def test_example_configs_load_and_build_agents(name):
     path = os.path.join(ROOT, "configs", name)
     if os.path.isdir(path):

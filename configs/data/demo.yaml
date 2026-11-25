@@ -11,7 +11,8 @@ workers: 4                    # 并行进程数（模拟者是模型时变成并
 
 prompt:                       # sft/dpo 里的提示词模板，要和你推理时用的一样
   name: v2
-  args: {recent_turns: 2}
+  args:
+    recent_turns: 2
 
 rollout:                      # 往下模拟打标签
   policy: rule+               # 双方用谁往下打：rule+（规则 AI + 观星避闪电）/ rule / 你的模型（见 full.yaml）
@@ -33,7 +34,9 @@ key:                          # 关键局面：模板名: 训练题数
 normal:                       # 普通局面：正常打几局，每局随机抽几个需要想的决策点
   games: 40
   per_game: 4
-  players: {A: rule+, B: rule+}
+  players:
+    A: rule+
+    B: rule+
 
 mix:
   key_share: 0.3              # 训练集里关键局面占 30%，普通局面 70%

@@ -35,22 +35,27 @@ players:
     proxy: auto                         # auto：本机和内网地址不走代理，其它按系统代理设置（HTTP_PROXY 等）
                                         # none：不走代理；system：完全按系统设置；或者写代理地址 http://127.0.0.1:7890
                                         # 遇到“HTTP 503”且没有内容，先看 docs/agents.md 的“请求失败排查”
-    # headers: {X-Custom: abc}          # 额外请求头
+    # headers:                          # 额外请求头
+    #   X-Custom: abc
     # extra_body:                       # 原样合并进请求体，传服务端特有参数
     #   top_k: 20
-    #   chat_template_kwargs: {enable_thinking: false}   # 例如关掉 Qwen3 的思考
+    #   chat_template_kwargs:           # 例如关掉 Qwen3 的思考
+    #     enable_thinking: false
 
     # ---- 采样 ----
     temperature: 0.7
     # top_p: 0.9
     max_tokens: 512                     # 思考型模型要调大，否则 JSON 还没输出就被截断
-    # stop: ["\n\n"]
+    # stop:
+    #   - "\n\n"
     # sample_seed: 42                   # 发给服务端的采样种子
 
     # ---- 提示词 ----
     prompt: default                     # 提示词模板：default（旧）或 v2（新：已知手牌 + 本回合和上一回合的关键事件），或 模块:类名
     history_lines: 40                   # default 模板带最近多少条可见日志
-    # prompt_args: {recent_turns: 2, keep_flow: false}   # v2 的参数：近况放几个回合、是否保留流程记录
+    # prompt_args:                      # v2 的参数：近况放几个回合、是否保留流程记录
+    #   recent_turns: 2
+    #   keep_flow: false
     ask_reason: false                   # true：要求模型先写理由 {"reason": ..., "action": ...}，理由进数据
     show_skill_text: true               # 附上场上技能和装备的原文
     # extra_rules: "优先保留桃和闪。"     # 追加在系统提示后面的策略提示

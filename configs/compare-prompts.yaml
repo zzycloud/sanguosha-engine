@@ -26,6 +26,12 @@ base:                         # 和普通对战配置的写法一样
 
 variants:
   old:                        # 旧提示词：局面 + 最近 40 条日志
-    players: {A: {prompt: default, label: 旧提示词}}
+    players:
+      A:
+        prompt: default
+        label: 旧提示词
   new:                        # 新提示词：局面 + 已知手牌 + 本回合和上一回合的关键事件
-    players: {A: {prompt: v2, label: 新提示词}}
+    players:
+      A:
+        prompt: v2
+        label: 新提示词

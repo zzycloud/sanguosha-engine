@@ -1,0 +1,7 @@
+# 本地假模型：不花钱、不联网，只用来看流程通不通、输出长什么样。
+# 先在另一个终端起它：uv run python -m sgs.tools.fake_llm --port 8001
+# 它会按题目要求回三行短分析加编号（编号是随便选的，不代表水平）。
+agent: llm
+label: 假模型
+base_url: http://127.0.0.1:8001/v1   # 必须是本机的假模型地址
+model: fake-cot

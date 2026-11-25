@@ -40,7 +40,7 @@ python -m sgs.tools.serve --human -1               # 网页里看两个规则 AI
 ```
 
 **接你自己的模型来打**：所有设置写在一个配置文件里，`configs/` 下有带注释的示例
-（规则 AI 对打、本地 vLLM、云 API、假模型、网页人机），详见 [docs/agents.md](docs/agents.md)，
+（规则 AI 对打、本地 vLLM、云 API、假模型、网页人机）。配置怎么读、模型文件和密钥放哪，先看 [configs/README.md](configs/README.md)；全部字段见 [docs/agents.md](docs/agents.md)，
 整体设计见 [docs/harness.md](docs/harness.md)。
 
 ```bash
@@ -59,7 +59,7 @@ python -m sgs.experiment configs/compare-prompts.yaml
 
 提示词上还能加两样，各自单独开关，不开时提示词和原来一样（见 [docs/tips-cot.md](docs/tips-cot.md)）：
 `tips: true` 把自己武将的实战技巧（`configs/tips/武将名.md`，你自己写）放进提示词；
-`cot: key` 让模型在关键决策（发动技能、卖血、拆顺选牌、弃牌）先写三行短分析（默认共 80 字以内）再给编号，`cot: all` 每个决策都分析；推理模型可以用 `cot_source: reasoning` 改记它自己的思考字段。
+`cot: key` 让模型在关键决策（发动技能、卖血、拆顺选牌、弃牌）先写三行短分析（默认共 80 字以内）再给编号，`cot: all` 每个决策都分析。
 四组对比（无 / 技巧 / 分析 / 两者）：`python -m sgs.experiment configs/compare-tips-cot.yaml`。
 导出成“三行短分析 + 编号”的训练数据：`python -m sgs_data.cot_export configs/data/cot-export.yaml`。
 

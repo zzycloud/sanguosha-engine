@@ -41,7 +41,7 @@ DEFAULTS: Dict[str, Any] = {
     "max_chars": DEFAULT_MAX_CHARS,   # 三行分析加起来最多多少字（去掉空白，含“局面：”这些标签）
     "overlong": "drop",          # content 分析超长时：drop 丢掉 / compress 用压缩模型改成三行 / keep 照样留
     "require_three_lines": True,  # content 分析不是标准三行时当作不合格（按 overlong 处理）
-    "compressor": None,          # 压缩用的模型，写法和 players.A 一样（例如 include: ../models/strong-api.yaml）
+    "compressor": None,          # 压缩用的模型，写法和 players.A 一样（例如 include: ../models/step-5-preview.yaml）
     "compress_retries": 1,       # 压缩结果不合格（超长或不是三行）时再压几次
     "concurrency": 4,            # 压缩请求的并发数
     "include_plain": False,      # 非关键决策（没有分析的）也导出，答案只有编号
