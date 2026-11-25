@@ -24,7 +24,8 @@ rollout:
 
 key:
   scenarios:
-    guojia_sell_hp: 800
+    # guojia_sell_hp: 800       # 规则 AI 模拟出来总是“出闪”，和实战经验（3 血有闪有桃一般卖血）相反，先不用；
+    #                           # 换成你的模型当模拟者（rollout.policy）后再打开
     guojia_yiji_kongcheng: 500
     zhuge_kongcheng: 600
     zhuge_lightning: 500
