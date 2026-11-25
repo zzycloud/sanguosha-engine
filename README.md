@@ -39,6 +39,19 @@ python -m sgs.tools.serve --generals 诸葛亮 吕布   # 网页里打，按提�
 python -m sgs.tools.serve --human -1               # 网页里看两个规则 AI 实时对打
 ```
 
+**接你自己的模型来打**（vLLM / SGLang / Ollama / 任何 OpenAI 兼容接口，详见 [docs/agents.md](docs/agents.md)）：
+
+```bash
+python -m sgs.arena --p0 "llm?model=Qwen2.5-7B-Instruct&base_url=http://localhost:8000/v1" \
+    --p1 rule --games 20 -j 4 --swap -o runs/qwen-vs-rule
+# 没有模型也能先跑通流程：起一个本地假模型
+python -m sgs.tools.fake_llm --port 8001 &
+python -m sgs.arena --p0 "llm?model=fake&base_url=http://127.0.0.1:8001/v1" --p1 rule --games 4
+```
+
+输出目录里有胜负统计、录像、每个决策点的数据，以及模型每次的完整请求和回复（可直接做 SFT/偏好数据）。
+网页对战也能换成模型：`python -m sgs.tools.serve --ai rule "llm?model=...&base_url=..."`。
+
 **导出训练数据**（每行一个决策点，字段见 [docs/data.md](docs/data.md)）：
 
 ```bash
@@ -50,7 +63,7 @@ python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl     # 附每�
 **跑测试和测速**：
 
 ```bash
-python -m pytest                       # 172 个单测
+python -m pytest                       # 196 个单测
 python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
 python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```
@@ -84,6 +97,15 @@ class MyAgent(Agent):
             if o.label.startswith("使用") and "杀" in o.label:
                 return i
         return len(d.options) - 1
+```
+
+注册一个名字就能在所有命令行里用（`--p0 mybot`、`--agents mybot rule`），也可以不注册，直接写 `模块:类名`：
+
+```python
+from sgs.agents import register_agent
+
+@register_agent("mybot")
+class MyAgent(Agent): ...
 ```
 
 rollout：在任意决策点复制状态，换着动作往下打。
@@ -164,12 +186,13 @@ register_general("貂蝉", "群", 3, "female", ("离间", "闭月"), pack="stand
 sgs/core/            核心引擎（不认识任何具体武将）
 sgs/packs/standard/  标准版：牌堆、卡牌、装备、技能、武将
 sgs/modes/           游戏模式（duel = 1v1）
-sgs/agents/          随机 AI、规则 AI
+sgs/agents/          智能体接口和注册表、随机 AI、规则 AI、大模型（llm/）
+sgs/arena.py         对战命令行（接模型打、并发、出录像和数据）
 sgs/env.py           类 gym 接口
 sgs/export.py        批量导出 JSONL
 sgs/rollout.py       rollout 估值
 sgs/replay.py        录像
-sgs/tools/           测速、本地网页对战
+sgs/tools/           测速、本地网页对战、本地假模型服务（fake_llm）
 web/index.html       观察页面
 tests/               规则单测
 docs/                设计文档、规则说明

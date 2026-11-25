@@ -7,3 +7,4 @@ dist/
 replay*.html
 replay*.json
 data/
+runs/

@@ -256,7 +256,7 @@ class Game:
 
     def has_listener(self, event: str) -> bool:
         for _, sk in self.all_skills():
-            if event in sk.events:
+            if sk.listens(event):
                 return True
         return False
 
@@ -402,7 +402,7 @@ class Game:
         if not p.alive:
             return
         for name in self.skills_of(seat):
-            if "lose_card" in R.SKILLS[name].events:
+            if R.SKILLS[name].listens("lose_card"):
                 p.marks.setdefault("_lostq", []).append(zone)
                 if seat not in self.queued:
                     self.queued.append(seat)

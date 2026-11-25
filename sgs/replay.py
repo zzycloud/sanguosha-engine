@@ -29,13 +29,17 @@ def decision_dict(d) -> Dict[str, Any]:
 
 
 def skill_category(sk) -> str:
-    """技能分类（给人看的标签）：主公技、锁定技、主动技（出牌阶段发动）、转化技、触发技（可选发动）。"""
+    """技能分类（给人看的标签）。
+
+    锁定技：强制生效不询问；其余都是非锁定技：
+    触发技（有发动时机，引擎询问是否发动）、主动技（出牌阶段作为选项）、转化技（出牌或响应时作为选项）、
+    常驻技（没有发动时机，只是放宽规则限制，例如咆哮、奇才；用不用由你出不出牌决定，没有可问的）。
+    """
     from .core.plugin import Skill
     if sk.lord:
         return "主公技"
-    if sk.compulsory:
-        # 原文写了“锁定技”的标锁定技；咆哮、奇才原文没写，但没有可选的余地，标被动技
-        return "锁定技" if "锁定技" in sk.description else "被动技"
+    if sk.locked:
+        return "锁定技"
     cls = type(sk)
     if cls.can_activate is not Skill.can_activate:
         return "主动技"
@@ -43,7 +47,7 @@ def skill_category(sk) -> str:
         return "转化技"
     if sk.events or cls.response_options is not Skill.response_options:
         return "触发技"
-    return "被动技"
+    return "常驻技"
 
 
 def meta(g: Game) -> Dict[str, Any]:
@@ -158,16 +162,17 @@ def to_html(rep: Dict, viewer_path: Optional[str] = None) -> str:
                         f"<script id=\"embedded-replay\" type=\"application/json\">{data}</script>")
 
 
-def make_agent(kind: str, seed: int):
-    from .agents import RandomAgent, RuleAgent
-    return {"random": RandomAgent, "rule": RuleAgent}[kind](seed)
+def make_agent(spec, seed: int):
+    from .agents.registry import make_agent as mk
+    return mk(spec, seed=seed)
 
 
 def main():
     ap = argparse.ArgumentParser(description="录制一局对局")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--generals", nargs=2, default=None)
-    ap.add_argument("--agents", nargs=2, default=["rule", "rule"], choices=["rule", "random"])
+    ap.add_argument("--agents", nargs=2, default=["rule", "rule"],
+                    help="两个座位的智能体：rule / random / llm?model=...（写法见 docs/agents.md）")
     ap.add_argument("-o", "--out", default="replay.html", help=".html（自带查看器）或 .json")
     a = ap.parse_args()
     kw = {"generals": a.generals} if a.generals else {"pick": "random"}

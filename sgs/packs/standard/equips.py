@@ -58,7 +58,7 @@ def _is_slash_by(ev, owner):
 @register_skill
 class Crossbow(EquipSkill):
     name = "诸葛连弩"
-    compulsory = True
+    locked = True
     description = "锁定技，出牌阶段你使用杀无次数限制。"
 
     def slash_limit_mod(self, g, owner):
@@ -68,7 +68,7 @@ class Crossbow(EquipSkill):
 @register_skill
 class QinggangSkill(EquipSkill):
     name = "青釭剑"
-    compulsory = True
+    locked = True
     events = ("target_confirm",)
     description = "锁定技，你使用的杀无视目标角色的防具。"
 
@@ -83,7 +83,7 @@ class QinggangSkill(EquipSkill):
 class DoubleSwordSkill(EquipSkill):
     name = "雌雄双股剑"
     events = ("target_confirm",)
-    description = "你使用杀指定一名异性角色后，可令其选择：弃置一张手牌，或令你摸一张牌。"
+    description = "你使用杀指定一名异性角色后，可以令其选择：弃置一张手牌，或令你摸一张牌。"
 
     def can_trigger(self, g, owner, event, ev):
         return _is_slash_by(ev, owner) and g.players[ev.target].gender != g.players[owner].gender
@@ -149,7 +149,6 @@ class IceFrame(Frame):
 class BladeSkill(EquipSkill):
     name = "青龙偃月刀"
     events = ("slash_dodged",)
-    self_ask = True
     description = "你使用的杀被闪抵消后，可以对该角色再使用一张杀。"
 
     def can_trigger(self, g, owner, event, ev):
@@ -169,15 +168,16 @@ class BladeFrame(Frame):
             vcs = [vc for vc in card_options(g, self.owner, ("杀",), {"mode": "use"})
                    if can_slash(g, self.owner, self.target, vc, check_range=False)]
             opts = [vc_option(g, vc, (self.target,), "青龙偃月刀：使用 ") for vc in vcs]
-            opts.append(Option(("pass",), "不发动"))
+            if not opts:
+                g.done()
+                return
             self.stage = 1
-            g.ask(Decision(self.owner, "respond", "青龙偃月刀：是否再使用一张杀？", opts,
+            g.ask(Decision(self.owner, "respond", "青龙偃月刀：选择再使用哪张杀", opts,
                            {"names": ["杀"], "skill": "青龙偃月刀", "target": self.target}))
         elif self.stage == 1:
             ans = g.answer()
             self.stage = 2
             if ans.key != ("pass",):
-                g.log(f"{g.pname(self.owner)} 发动了【青龙偃月刀】", "skill")
                 g.push(UseCardFrame(self.owner, ans.data, (self.target,), {"extra_slash": True}))
         else:
             g.done()
@@ -300,7 +300,7 @@ class BaguaFrame(Frame):
 @register_skill
 class RenwangSkill(EquipSkill):
     name = "仁王盾"
-    compulsory = True
+    locked = True
     events = ("target_confirm",)
     description = "锁定技，黑色的杀对你无效。"
 

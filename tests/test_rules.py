@@ -188,7 +188,7 @@ def test_guicai_retrial_then_tiandu_gets_final_card():
     end_turn(g)
     # 判定牌 ♥4桃 → 司马懿鬼才改成黑色？他手里只有 ♥3桃，改成另一张红桃
     assert "鬼才" in g.pending.prompt
-    choose(g, "♥3桃")
+    choose(g, "是")         # 非锁定技：先问是否发动；手里只有 ♥3桃，选牌自动
     assert "天妒" in g.pending.prompt
     choose(g, "是")
     hand = [g.cards[c] for c in g.players[1].hand]
@@ -201,7 +201,7 @@ def test_guicai_changes_indulgence_result():
     choose(g, "乐不思蜀")
     stack_deck(g, "♥4桃")  # 红桃：本来不跳过
     end_turn(g)
-    choose(g, "♠7杀")       # 改判为黑桃
+    choose(g, "是")         # 发动鬼才，手里只有 ♠7杀，自动改判为黑桃
     assert g.current == 0   # 孙权跳过出牌阶段
 
 
@@ -293,7 +293,7 @@ def test_blade_followup_slash():
     choose(g, "♠7杀")
     choose(g, "使用 ")
     assert "青龙偃月刀" in g.pending.prompt
-    choose(g, "♠8杀")
+    choose(g, "是")         # 只有一张 ♠8杀，自动使用
     assert hp(g, 1) == 3
 
 

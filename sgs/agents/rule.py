@@ -28,6 +28,8 @@ def card_value(g, cid) -> float:
 
 
 class RuleAgent(Agent):
+    name = "rule"
+
     def __init__(self, seed: Optional[int] = None):
         self.rng = random.Random(seed)
 
@@ -121,22 +123,32 @@ class RuleAgent(Agent):
                 return i
         return 0 if len(d.options) > 1 else pass_i
 
-    def _guicai(self, g, d):
+    def _guicai_card(self, g, d):
+        """鬼才：有能把判定改成对自己有利的手牌就返回它，否则 None。"""
         ctx = d.ctx
         me, seat, reason = d.player, ctx["judge_seat"], ctx["judge_reason"]
         good = JUDGE_GOOD.get(reason)
         if good is None:
-            return len(d.options) - 1
+            return None
         want_good = not g.is_enemy(me, seat)
         if good(g.card(ctx["judge_card"])) == want_good:
-            return len(d.options) - 1
+            return None
+        for c in g.hand:
+            if good(g.card(c)) == want_good:
+                return c
+        return None
+
+    def _guicai(self, g, d):
+        c = self._guicai_card(g, d)
         for i, o in enumerate(d.options):
-            if o.key[0] == "card" and good(g.card(o.key[1])) == want_good:
+            if o.key == ("card", c):
                 return i
-        return len(d.options) - 1
+        return 0
 
     # ---------------------------------------------------------- 是否发动
     def _trigger(self, g, d):
+        if d.ctx.get("skill") == "鬼才":
+            return 0 if self._guicai_card(g, d) is not None else 1
         return 0
 
     # ---------------------------------------------------------- 其它选择

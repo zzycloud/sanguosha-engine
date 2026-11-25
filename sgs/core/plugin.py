@@ -53,26 +53,36 @@ class CardSpec:
 class Skill:
     """技能基类。一个技能实例是无状态的单例，玩家相关的数据存在 player.marks 里。
 
+    是否询问由引擎统一决定，技能自己不管：
+    - 锁定技（locked = True，原文写“锁定技”）：时机到了强制生效，不询问；
+    - 非锁定技：events 里的每个发动时机，引擎都先问“是否发动”，答“是”才执行；
+    - effects：不是发动时机，而是已经发动的技能的后续效果（例如裸衣发动后本回合伤害 +1），到时直接执行，不询问。
+
     触发技：events 非空，实现 can_trigger 和 on_trigger / make_frame。
-    锁定技：compulsory = True，满足条件自动发动，不询问。
     转化技：实现 view_as。
     主动技（出牌阶段发动）：实现 can_activate 和 activate。
     规则修正：实现 distance_mod / range_mod / slash_limit_mod / max_hand_mod / prohibit 等。
     """
 
     name: str = ""
-    events: Tuple[str, ...] = ()
-    compulsory: bool = False
+    events: Tuple[str, ...] = ()    # 发动时机（非锁定技会被询问）
+    effects: Tuple[str, ...] = ()   # 后续效果的时机（从不询问）
+    locked: bool = False            # 锁定技
     lord: bool = False
     equip: bool = False  # 装备技能（失去装备即失去）
     description: str = ""
 
     # ---- 触发技 ----
-    def is_compulsory(self, event: str) -> bool:
-        """该时机是否不询问直接发动（锁定技，或技能帧自己带“不发动”选项）。"""
-        return self.compulsory or self.self_ask
+    def listens(self, event: str) -> bool:
+        return event in self.events or event in self.effects
 
-    self_ask: bool = False  # True：不先问“是否发动”，由技能帧自己给出“不发动”选项
+    def asks(self, event: str) -> bool:
+        """引擎的统一规则：非锁定技在发动时机询问；锁定技和后续效果不询问。"""
+        return not self.locked and event in self.events and event not in self.effects
+
+    def trigger_ctx(self, g, owner: int, event: str, ev) -> dict:
+        """询问“是否发动”时附带的上下文（给 AI 和提示词用），例如鬼才要改的判定牌。"""
+        return {}
 
     def can_trigger(self, g, owner: int, event: str, ev) -> bool:
         return False

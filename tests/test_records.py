@@ -289,11 +289,31 @@ def test_biyue_is_optional():
 
 
 def test_skill_descriptions_match_flags():
+    # 锁定技与否以原文为准：原文写“锁定技”的才是锁定技
     from sgs.core import registry as R
     for name, sk in R.SKILLS.items():
-        if sk.equip:
-            continue
-        if sk.compulsory and sk.events:
-            assert "锁定技" in sk.description, name
-        if sk.events and not sk.compulsory:
+        assert sk.locked == ("锁定技" in sk.description), name
+        if sk.events and not sk.locked:
             assert "可以" in sk.description, name
+
+
+def test_engine_asks_every_non_locked_trigger_and_never_locked():
+    """引擎统一规则：非锁定技在每个发动时机都询问，锁定技从不询问。"""
+    from collections import Counter
+    from sgs.core import registry as R
+    asked, fired = Counter(), Counter()
+    for seed in range(150):
+        g = Game(seed=seed, pick="random")
+        play_game(g, [RandomAgent(seed), RandomAgent(seed + 1)])
+        for d in g.decisions:
+            if d["kind"] == "trigger":
+                asked[d["ctx"]["skill"]] += 1
+        for e in g.logs:
+            sk = (e.get("data") or {}).get("skill")
+            if sk and "锁定技" in e["text"]:
+                fired[sk] += 1
+    for name, sk in R.SKILLS.items():
+        if sk.locked:
+            assert asked[name] == 0, name
+    assert asked["闭月"] and asked["鬼才"] and asked["青龙偃月刀"] and asked["裸衣"]
+    assert fired["无双"] and fired["仁王盾"]

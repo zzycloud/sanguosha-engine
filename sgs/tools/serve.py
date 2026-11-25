@@ -10,7 +10,7 @@ import random
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from ..agents import RuleAgent
+from ..agents import make_agent
 from ..core.game import Game
 from ..replay import Recorder
 
@@ -18,13 +18,15 @@ WEB = os.path.join(os.path.dirname(__file__), "..", "..", "web", "index.html")
 
 
 class Session:
-    def __init__(self, human, generals=None, seed=None):
+    def __init__(self, human, generals=None, seed=None, ai=("rule", "rule")):
         self.human = human
         seed = random.randrange(10 ** 6) if seed is None else seed
         kw = {"generals": generals} if generals else {"pick": "random"}
         self.rec = Recorder.new_game("duel", seed=seed, auto_single=False, **kw)
         self.g = self.rec.g
-        self.agents = [RuleAgent(seed), RuleAgent(seed + 1)]
+        self.agents = [make_agent(ai[0], seed=seed), make_agent(ai[1], seed=seed + 1)]
+        for s, ag in enumerate(self.agents):
+            ag.on_game_start({"game_id": f"live-{seed}", "seat": s, "seed": seed, "mode": "duel"})
         if human is not None:
             self.agents[human] = None
         self.rec.run(self.agents)
@@ -98,7 +100,7 @@ def make_handler(state):
             if u.path == "/api/new":
                 q = parse_qs(u.query)
                 gens = q.get("generals", [None])[0]
-                state["s"] = Session(state["human"], gens.split(",") if gens else state["generals"])
+                state["s"] = Session(state["human"], gens.split(",") if gens else state["generals"], ai=state["ai"])
                 return self._json({"ok": True})
             if u.path in ("/", "/index.html"):
                 with open(WEB, "rb") as f:
@@ -128,9 +130,11 @@ def main():
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--human", type=int, default=0, help="人类控制的座位，-1 表示 AI 对 AI")
     ap.add_argument("--generals", nargs=2, default=None)
+    ap.add_argument("--ai", nargs=2, default=["rule", "rule"], metavar=("P0", "P1"),
+                    help="两个座位的 AI（人类座位上的那个会被忽略）：rule / random / llm?model=...，见 docs/agents.md")
     a = ap.parse_args()
     human = None if a.human < 0 else a.human
-    state = {"human": human, "generals": a.generals, "s": Session(human, a.generals)}
+    state = {"human": human, "generals": a.generals, "ai": a.ai, "s": Session(human, a.generals, ai=a.ai)}
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(state))
     q = f"?live=1&human={human}" if human is not None else "?live=1"
     print(f"打开 http://127.0.0.1:{a.port}/{q}")

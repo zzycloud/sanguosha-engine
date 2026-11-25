@@ -10,7 +10,7 @@ python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl        # 附 
 
 | 参数 | 含义 |
 | --- | --- |
-| `--agents rule random` | 两个座位用的 AI（`rule` / `random`） |
+| `--agents rule random` | 两个座位用的 AI：`rule` / `random` / `llm?model=...` 等，写法见 [agents.md](agents.md) |
 | `--generals 关羽 吕布` | 固定武将；不填就每局随机两名标准武将 |
 | `--rollouts K` | 对每个合法动作做 K 次确定化 rollout，写入 `rollout_values` |
 | `--include-auto` | 也导出只有一个选项、被自动选掉的决策（`auto: true`） |
@@ -31,6 +31,7 @@ python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl        # 附 
 | `step` | 这局第几个决策（含自动跳过的决策），从 0 开始 | 可以 |
 | `turn`、`phase` | 回合数和阶段（`prepare/judge/draw/play/discard/finish`） | 可以 |
 | `player`、`general`、`agent` | 决策者座位、武将、用的哪个 AI | 可以（`agent` 别给） |
+| `agent_info` | 智能体附加信息（模型的：`source` 是 llm 还是兜底、`attempts`、`reason`、`errors`），只有模型等会给 | 不能 |
 | `obs` | 决策者视角的观察，见下表 | 可以 |
 | `history` | 决策者看得到的日志文本（含自己的私密信息，如摸到什么牌） | 可以 |
 | `decision` | `kind`（play/respond/trigger/choose）、`prompt`、`ctx`（是谁的杀、要哪种牌、判定原因等） | 可以 |

@@ -66,10 +66,15 @@ class Fankui(Skill):
 class Guicai(Skill):
     name = "鬼才"
     events = ("judge_retrial",)
-    self_ask = True
     description = "在任意角色的判定牌生效前，你可以打出一张手牌代替之。"
     def can_trigger(self, g, owner, event, ev):
         return bool(g.players[owner].hand)
+
+    def trigger_prompt(self, g, owner, event, ev):
+        return f"{g.pname(ev.seat)} 的【{ev.reason}】判定牌为 {g.cstr(ev.card)}，是否发动【鬼才】改判？"
+
+    def trigger_ctx(self, g, owner, event, ev):
+        return {"judge_seat": ev.seat, "judge_reason": ev.reason, "judge_card": ev.card}
 
     def make_frame(self, g, owner, event, ev):
         return GuicaiFrame(owner, ev)
@@ -83,10 +88,9 @@ class GuicaiFrame(Frame):
         if self.stage == 0:
             p = g.players[self.owner]
             opts = [Option(("card", c), f"打出 {g.cstr(c)} 代替") for c in p.hand]
-            opts.append(Option(("pass",), "不发动"))
             self.stage = 1
-            g.ask(Decision(self.owner, "respond",
-                           f"鬼才：{g.pname(self.ev.seat)} 的【{self.ev.reason}】判定牌为 {g.cstr(self.ev.card)}，是否改判？",
+            g.ask(Decision(self.owner, "choose",
+                           f"鬼才：{g.pname(self.ev.seat)} 的【{self.ev.reason}】判定牌为 {g.cstr(self.ev.card)}，选择打出哪张手牌代替",
                            opts, {"skill": "鬼才", "judge_seat": self.ev.seat, "judge_reason": self.ev.reason,
                                   "judge_card": self.ev.card}))
             return
@@ -192,11 +196,9 @@ class TuxiFrame(Frame):
 @register_skill
 class Luoyi(Skill):
     name = "裸衣"
-    events = ("draw_phase", "damage_cause")
+    events = ("draw_phase",)          # 发动时机：摸牌阶段（询问）
+    effects = ("damage_cause",)       # 后续效果：发动后本回合伤害 +1（不询问）
     description = "摸牌阶段，你可以少摸一张牌；若如此做，该回合的出牌阶段，你使用杀或决斗（你为伤害来源时）造成的伤害 +1。"
-    def is_compulsory(self, event):
-        return event == "damage_cause"
-
     def can_trigger(self, g, owner, event, ev):
         if event == "draw_phase":
             return ev.seat == owner and ev.count > 0
@@ -386,7 +388,6 @@ class Wusheng(Skill):
 @register_skill
 class Paoxiao(Skill):
     name = "咆哮"
-    compulsory = True
     description = "出牌阶段，你可以使用任意数量的杀。"
     def slash_limit_mod(self, g, owner):
         return INF
@@ -440,7 +441,7 @@ class GuanxingFrame(Frame):
 @register_skill
 class Kongcheng(Skill):
     name = "空城"
-    compulsory = True
+    locked = True
     description = "锁定技，当你没有手牌时，你不能成为杀或决斗的目标。"
     def prohibit(self, g, owner, user, target, vc):
         return target == owner and not g.players[owner].hand and vc.name in ("杀", "决斗")
@@ -463,7 +464,7 @@ class Longdan(Skill):
 @register_skill
 class Mashu(Skill):
     name = "马术"
-    compulsory = True
+    locked = True
     description = "锁定技，当你计算与其他角色的距离时，始终 -1。"
     def distance_mod(self, g, owner, frm, to):
         return -1 if frm == owner else 0
@@ -515,7 +516,6 @@ class Jizhi(Skill):
 @register_skill
 class Qicai(Skill):
     name = "奇才"
-    compulsory = True
     description = "你使用任何锦囊无距离限制。"
     def ignore_distance(self, g, owner, user, vc):
         return CARDS[vc.name].is_trick
@@ -712,7 +712,7 @@ class LiuliFrame(Frame):
 @register_skill
 class Qianxun(Skill):
     name = "谦逊"
-    compulsory = True
+    locked = True
     description = "锁定技，你不能成为顺手牵羊和乐不思蜀的目标。"
     def prohibit(self, g, owner, user, target, vc):
         return target == owner and vc.name in ("顺手牵羊", "乐不思蜀")
@@ -780,7 +780,7 @@ class Xiaoji(Skill):
 @register_skill
 class Wushuang(Skill):
     name = "无双"
-    compulsory = True
+    locked = True
     events = ("target_confirm",)
     description = "锁定技，你使用杀时，目标角色需连续使用两张闪才能抵消；与你进行决斗的角色每次需连续打出两张杀。"
     def can_trigger(self, g, owner, event, ev):
@@ -917,5 +917,5 @@ class Jijiang(Skill):
 class Jiuyuan(Skill):
     name = "救援"
     lord = True
-    compulsory = True
+    locked = True
     description = "主公技，锁定技，其他吴势力角色在你濒死状态下对你使用桃时，你额外回复 1 点体力。"

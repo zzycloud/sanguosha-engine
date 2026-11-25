@@ -27,9 +27,10 @@ from .core.registry import GENERALS, load_all
 FORMAT = "sgs-decision/1"
 
 
-def make_agent(kind: str, seed: int):
-    from .agents import RandomAgent, RuleAgent
-    return {"random": RandomAgent, "rule": RuleAgent}[kind](seed)
+def make_agent(spec, seed: int):
+    """兼容旧接口：spec 可以是 "rule" / "random" / "llm?..." 等任意注册过的智能体写法。"""
+    from .agents.registry import make_agent as mk
+    return mk(spec, seed=seed)
 
 
 def _privileged(g: Game) -> Dict[str, Any]:
@@ -48,75 +49,109 @@ def card_table(deck: str = "standard") -> List[Dict[str, Any]]:
     return [g.card_dict(c) for c in range(len(g.cards))]
 
 
-def play_and_export(seed: int, agents: List[str], generals: Optional[List[str]] = None, mode: str = "duel",
-                    rollouts: int = 0, include_auto: bool = False, history: str = "new",
-                    privileged: bool = True) -> List[Dict[str, Any]]:
-    """跑一局，返回这局所有决策点的行（局结束后才填 outcome）。"""
-    load_all()
-    if generals is None:
-        names = sorted(n for n, gg in GENERALS.items() if gg.pack == "standard")
-        generals = random.Random(seed).sample(names, 2)
-    g = Game(mode, seed=seed, generals=list(generals))
-    ags = [make_agent(a, seed * 7 + i) for i, a in enumerate(agents)]
-    rows: List[Dict[str, Any]] = []
-    last_log = {s: 0 for s in range(len(g.players))}   # 每个玩家上次决策时看到的日志位置
-    while not g.over:
+class DecisionLog:
+    """边打边生成导出行：before() 在决策前记下决策者视角，after() 填入选择。一局一个。"""
+
+    def __init__(self, g: Game, game_id: str, agent_names, rollouts: int = 0, history: str = "new",
+                 privileged: bool = True):
+        self.g = g
+        self.game_id = game_id
+        self.agent_names = list(agent_names)
+        self.rollouts = rollouts
+        self.history = history
+        self.privileged = privileged
+        self.rows: List[Dict[str, Any]] = []
+        self.last_log = {s: 0 for s in range(len(g.players))}   # 每个玩家上次决策时看到的日志位置
+
+    def before(self) -> Dict[str, Any]:
+        g = self.g
         d = g.pending
         seat = d.player
         view = g.view(seat, derived=True)
-        if history == "full":
-            hist_from = 0
-        else:
-            hist_from = last_log[seat]
+        hist_from = 0 if self.history == "full" else self.last_log[seat]
         hist = [t for t in (log_text(e, seat) for e in g.logs[hist_from:]) if t is not None]
-        last_log[seat] = len(g.logs)
-        obs = view.to_dict()
+        self.last_log[seat] = len(g.logs)
         row: Dict[str, Any] = {
-            "format": FORMAT, "game_id": f"{mode}-{seed}", "seed": seed, "mode": mode,
+            "format": FORMAT, "game_id": self.game_id, "seed": g.seed, "mode": g.mode_name,
             "step": len(g.decisions), "turn": g.turn_count, "phase": g.phase, "player": seat,
             "general": g.players[seat].general,
-            "agent": agents[seat],
-            "obs": obs,
-            "history": hist, "history_mode": history,
+            "agent": self.agent_names[seat],
+            "obs": view.to_dict(),
+            "history": hist, "history_mode": self.history,
             "decision": {"kind": d.kind, "prompt": d.prompt, "ctx": _plain_ctx(d.ctx)},
             "legal_actions": [{"key": _plain(o.key), "label": o.label} for o in d.options],
             "auto": False,
         }
-        if privileged:
+        if self.privileged:
             row["privileged"] = _privileged(g)
-        if rollouts > 0 and len(d.options) > 1:
+        if self.rollouts > 0 and len(d.options) > 1:
             from .rollout import evaluate
-            row["rollout_values"] = evaluate(g, rollouts, seed=seed * 1000 + len(g.decisions))
-            row["rollout_n"] = rollouts
-        i = ags[seat].choose(view, d)
+            row["rollout_values"] = evaluate(g, self.rollouts, seed=g.seed * 1000 + len(g.decisions))
+            row["rollout_n"] = self.rollouts
+        row["_view"] = view
+        return row
+
+    def after(self, row: Dict[str, Any], i: int, info: Optional[Dict[str, Any]] = None) -> None:
+        row.pop("_view", None)
         row["action"] = i
         row["action_key"] = row["legal_actions"][i]["key"]
         row["action_label"] = row["legal_actions"][i]["label"]
-        rows.append(row)
+        if info:
+            row["agent_info"] = info
+        self.rows.append(row)
+
+    def finish(self, include_auto: bool = False, result: Optional[str] = None) -> List[Dict[str, Any]]:
+        g = self.g
+        rows = self.rows
+        if include_auto:
+            manual_steps = {r["step"] for r in rows}
+            for rec in g.decisions:
+                if rec["auto"] and rec["i"] not in manual_steps:
+                    rows.append({
+                        "format": FORMAT, "game_id": self.game_id, "seed": g.seed, "mode": g.mode_name,
+                        "step": rec["i"], "turn": rec["turn"], "phase": rec["phase"], "player": rec["player"],
+                        "general": g.players[rec["player"]].general, "agent": None, "auto": True,
+                        "decision": {"kind": rec["kind"], "prompt": rec["prompt"], "ctx": rec["ctx"]},
+                        "legal_actions": rec["options"], "action": 0,
+                        "action_key": rec["options"][0]["key"], "action_label": rec["options"][0]["label"],
+                    })
+            rows.sort(key=lambda r: r["step"])
+        outcome = {
+            "winner": g.winner, "result": result or g.result, "turns": g.turn_count,
+            "generals": [p.general for p in g.players], "num_decisions": len(g.decisions),
+            "num_manual": len(g.history),
+        }
+        for r in rows:
+            seat = r["player"]
+            reward = 0.0 if g.winner is None else (1.0 if g.winner == seat else -1.0)
+            r["outcome"] = dict(outcome, reward=reward)
+        return rows
+
+
+def random_generals(seed: int, n: int = 2) -> List[str]:
+    load_all()
+    names = sorted(nm for nm, gg in GENERALS.items() if gg.pack == "standard")
+    return random.Random(seed).sample(names, n)
+
+
+def play_and_export(seed: int, agents: List[Any], generals: Optional[List[str]] = None, mode: str = "duel",
+                    rollouts: int = 0, include_auto: bool = False, history: str = "new",
+                    privileged: bool = True) -> List[Dict[str, Any]]:
+    """跑一局，返回这局所有决策点的行（局结束后才填 outcome）。
+    agents 里每项可以是智能体写法（"rule"、"llm?model=..."）或 Agent 实例。"""
+    from .agents.registry import spec_name
+    load_all()
+    if generals is None:
+        generals = random_generals(seed)
+    g = Game(mode, seed=seed, generals=list(generals))
+    ags = [make_agent(a, seed * 7 + i) for i, a in enumerate(agents)]
+    dl = DecisionLog(g, f"{mode}-{seed}", [spec_name(a) for a in agents], rollouts, history, privileged)
+    while not g.over:
+        row = dl.before()
+        i = decide(ags[row["player"]], g)
+        dl.after(row, i, ags[row["player"]].last_info)
         g.act(i)
-    if include_auto:
-        manual_steps = {r["step"] for r in rows}
-        for rec in g.decisions:
-            if rec["auto"] and rec["i"] not in manual_steps:
-                rows.append({
-                    "format": FORMAT, "game_id": f"{mode}-{seed}", "seed": seed, "mode": mode,
-                    "step": rec["i"], "turn": rec["turn"], "phase": rec["phase"], "player": rec["player"],
-                    "general": g.players[rec["player"]].general, "agent": None, "auto": True,
-                    "decision": {"kind": rec["kind"], "prompt": rec["prompt"], "ctx": rec["ctx"]},
-                    "legal_actions": rec["options"], "action": 0,
-                    "action_key": rec["options"][0]["key"], "action_label": rec["options"][0]["label"],
-                })
-        rows.sort(key=lambda r: r["step"])
-    outcome = {
-        "winner": g.winner, "result": g.result, "turns": g.turn_count,
-        "generals": [p.general for p in g.players], "num_decisions": len(g.decisions),
-        "num_manual": len(g.history),
-    }
-    for r in rows:
-        seat = r["player"]
-        reward = 0.0 if g.winner is None else (1.0 if g.winner == seat else -1.0)
-        r["outcome"] = dict(outcome, reward=reward)
-    return rows
+    return dl.finish(include_auto)
 
 
 def _plain(x):
@@ -144,7 +179,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="批量对局并导出 JSONL（每行一个决策点）")
     ap.add_argument("--games", type=int, default=100)
     ap.add_argument("--seed", type=int, default=0, help="第一局的种子，之后依次 +1")
-    ap.add_argument("--agents", nargs=2, default=["rule", "rule"], choices=["rule", "random"])
+    ap.add_argument("--agents", nargs=2, default=["rule", "rule"],
+                    help="两个座位的智能体：rule / random / llm?model=...（写法见 docs/agents.md）")
     ap.add_argument("--generals", nargs=2, default=None, help="不填则每局随机两名标准武将")
     ap.add_argument("--rollouts", type=int, default=0, help="每个合法动作做几次 rollout 估值，0 表示不做")
     ap.add_argument("--include-auto", action="store_true", help="也导出只有一个选项、被自动跳过的决策")

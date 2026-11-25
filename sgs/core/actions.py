@@ -23,7 +23,7 @@ def trigger(g, event: str, ev, only: Optional[int] = None) -> bool:
         if only is not None and s != only:
             continue
         for name in g.skills_of(s):
-            if event in R.SKILLS[name].events:
+            if R.SKILLS[name].listens(event):
                 g.push(TriggerFrame(event, ev, only))
                 return True
     return False
@@ -122,7 +122,7 @@ class TriggerFrame(Frame):
     def step(self, g):
         if self.stage == 0:
             self.queue = [(s, n) for s in g.alive_seats() if self.only is None or s == self.only
-                          for n in g.skills_of(s) if self.event in R.SKILLS[n].events]
+                          for n in g.skills_of(s) if R.SKILLS[n].listens(self.event)]
             self.i = 0
             self.stage = 1
         if self.stage == 1:
@@ -134,18 +134,21 @@ class TriggerFrame(Frame):
                     continue
                 if not sk.can_trigger(g, s, self.event, self.ev):
                     continue
-                if sk.is_compulsory(self.event):
-                    if sk.compulsory:
-                        g.log(f"{g.pname(s)} 的【{name}】被触发", "skill", seat=s, skill=name)
+                if not sk.asks(self.event):
+                    # 锁定技强制生效；后续效果直接执行。都不询问。
+                    if sk.locked and self.event in sk.events:
+                        g.log(f"{g.pname(s)} 的【{name}】被触发（锁定技）", "skill", seat=s, skill=name)
                     f = sk.make_frame(g, s, self.event, self.ev)
                     if f is not None:
                         g.push(f)
                     return
+                # 非锁定技：在发动时机询问是否发动
                 self.cur = (s, name)
                 self.stage = 2
+                ctx = {"skill": name, "event": self.event}
+                ctx.update(sk.trigger_ctx(g, s, self.event, self.ev))
                 g.ask(Decision(s, "trigger", sk.trigger_prompt(g, s, self.event, self.ev),
-                               [Option(("yes",), f"是，发动【{name}】"), Option(("no",), "否，不发动")],
-                               {"skill": name, "event": self.event}))
+                               [Option(("yes",), f"是，发动【{name}】"), Option(("no",), "否，不发动")], ctx))
                 return
             g.done()
             return

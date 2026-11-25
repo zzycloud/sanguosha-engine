@@ -67,6 +67,7 @@ class PlayerView:
     def __init__(self, g, viewer: int, with_logs: bool = False, derived: bool = False):
         self.viewer = viewer
         self.seat = viewer
+        self.step = len(g.decisions)   # 这局第几个决策（含自动选择的），开日志时有效
         self.turn = g.turn_count
         self.current = g.current
         self.phase = g.phase
@@ -118,6 +119,22 @@ class PlayerView:
             self.max_hand = g.max_hand(viewer)
         self.enemy = {s: g.mode.known_enemy(g, viewer, s) for s in range(n)}
         self.logs = g.visible_logs(viewer) if with_logs else None
+        # 技能原文（视角里出现的技能，给提示词用）
+        from . import registry as R
+        self.skill_text = {s: R.SKILLS[s].description for p in self.players for s in p.skills if s in R.SKILLS}
+        self.locked_skills = {s for s in self.skill_text if R.SKILLS[s].locked}
+        # 看得到的装备牌（场上和自己手里）的效果说明
+        self.equip_text: Dict[str, str] = {}
+        for c in self._cards.values():
+            spec = R.CARDS.get(c.name)
+            if spec is not None and spec.type == "equip" and c.name not in self.equip_text:
+                if spec.skill and spec.skill in R.SKILLS:
+                    self.equip_text[c.name] = R.SKILLS[spec.skill].description
+                elif spec.subtype in ("plus_horse", "minus_horse"):
+                    self.equip_text[c.name] = ("其他角色计算与你的距离 +1。" if spec.subtype == "plus_horse"
+                                               else "你计算与其他角色的距离 -1。")
+                if spec.subtype == "weapon":
+                    self.equip_text[c.name] = f"攻击范围 {spec.weapon_range}。" + self.equip_text.get(c.name, "")
 
     # ------------------------------------------------------------- 查询
     @property

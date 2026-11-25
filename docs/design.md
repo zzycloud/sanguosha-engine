@@ -20,9 +20,10 @@ sgs/
     actions.py     通用结算帧：回合、出牌、使用牌、无懈链、响应、伤害、濒死、判定……
   packs/standard/  标准版扩展包：牌堆、基本牌、锦囊、装备、25 名武将的技能
   modes/duel.py    1v1 两人对决模式
-  agents/          随机 AI、规则 AI
+  agents/          智能体接口、注册表、随机 AI、规则 AI、大模型（agents/llm/，见 docs/agents.md）
   env.py           类 gym 接口
   export.py        批量导出 JSONL 训练数据（docs/data.md）
+  arena.py         对战命令行：指定双方智能体，并发对局，出统计、录像、数据和模型调用记录
   rollout.py       rollout 估值
   replay.py        录像（JSON / 自带查看器的单文件 HTML）
   tools/           测速、本地网页对战
@@ -77,8 +78,12 @@ class DuelFrame(Frame):
 | `judge_done` | 判定牌生效后 | 天妒 |
 | `lose_card` | 失去牌后（本步结束后统一触发） | 连营、枭姬 |
 
-触发顺序：从当前回合角色开始按座次，每名角色按技能列表顺序。非锁定技先问“是否发动”；
-锁定技直接发动；`self_ask=True` 的技能不先问，由技能自己的决策给出“不发动”选项（避免问两次，例如鬼才、青龙偃月刀）。
+触发顺序：从当前回合角色开始按座次，每名角色按技能列表顺序。
+
+“问不问”由引擎统一决定，技能自己不能改：技能的 `events` 是发动时机，`effects` 是发动后续效果的时机（例如裸衣：
+`events=("draw_phase",)`、`effects=("damage_cause",)`），`locked` 表示锁定技。`Skill.asks(event)` 为真（非锁定技、
+事件在 `events` 里）时，引擎先问持有者“是否发动【X】”，选否就记一条“没有发动”；锁定技和 `effects` 里的事件直接结算。
+新技能只要把这三个字段按原文填对，就自动符合规则。
 
 除了事件，技能还可以实现这些**规则钩子**（核心查询时汇总所有存活角色的技能）：
 
