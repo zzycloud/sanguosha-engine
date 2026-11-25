@@ -3,8 +3,9 @@
 PlayerView 是在决策点生成的一份快照，内部不持有 Game 的引用，所以拿到它的代码
 没有办法读到对手手牌、牌堆顺序或别人的私密日志。看不见的牌用 view.card() 去查会报错。
 
-能看到的牌：自己的手牌、所有人的装备区和判定区、处理区、弃牌堆，以及当前决策选项里
-出现的牌（例如观星看到的牌堆顶、五谷丰登亮出的牌、鬼才要改的判定牌）。
+能看到的牌：自己的手牌、所有人的装备区和判定区、处理区、弃牌堆，当前决策选项里
+出现的牌（例如观星看到的牌堆顶、五谷丰登亮出的牌、鬼才要改的判定牌），以及已知的别人的手牌
+（通过五谷丰登、顺手牵羊、仁德等公开途径进入别人手牌、之后还没离开的牌，见 Game.known）。
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ class PublicPlayer:
     """一名角色的公开信息（加上 viewer 自己的手牌）。"""
 
     __slots__ = ("seat", "general", "kingdom", "gender", "hp", "max_hp", "alive", "skills",
-                 "hand_count", "equips", "judges", "hand", "marks")
+                 "hand_count", "equips", "judges", "hand", "marks", "known_hand", "known_by")
 
     def __init__(self, **kw):
         for k in self.__slots__:
@@ -80,6 +81,8 @@ class PlayerView:
         self.players: List[PublicPlayer] = []
         visible = set(g.discard) | set(g.processing)
         zone: Dict[int, Tuple[str, int]] = {}
+        # 已知手牌的来源：{牌: {how, turn, zone, from}}，只含这个视角能看到的手牌
+        self.known_info: Dict[int, Dict[str, Any]] = {}
         for p in g.players:
             for slot, c in p.equips.items():
                 visible.add(c)
@@ -88,15 +91,29 @@ class PlayerView:
                 visible.add(c)
                 zone[c] = ("j", p.seat)
             own = p.seat == viewer
+            # 别人手里我知道的牌；我手里别人知道的牌（座位 -> 他知道的我的手牌）
+            known_hand = None if own else tuple(g.known_by(viewer, p.seat))
+            known_by = None
             if own:
-                visible.update(p.hand)
+                known_by = {}
                 for c in p.hand:
-                    zone[c] = ("h", p.seat)
+                    for s in sorted(g.known.get(c, {}).get("by", ())):
+                        if s != viewer:
+                            known_by.setdefault(s, []).append(c)
+                known_by = {s: tuple(v) for s, v in known_by.items()}
+            shown = p.hand if own else known_hand
+            visible.update(shown)
+            for c in shown:
+                zone[c] = ("h", p.seat)
+                if c in g.known:
+                    k = g.known[c]
+                    self.known_info[c] = {"how": k["how"], "turn": k["turn"], "zone": k["zone"], "from": k["from"]}
             self.players.append(PublicPlayer(
                 seat=p.seat, general=p.general, kingdom=p.kingdom, gender=p.gender, hp=p.hp,
                 max_hp=p.max_hp, alive=p.alive, skills=tuple(p.skills), hand_count=len(p.hand),
                 equips=dict(p.equips), judges=tuple(p.judges), hand=tuple(p.hand) if own else None,
-                marks={k: v for k, v in p.marks.items() if not k.startswith("_")}))
+                marks={k: v for k, v in p.marks.items() if not k.startswith("_")},
+                known_hand=known_hand, known_by=known_by))
         for c in g.discard:
             zone[c] = ("d", None)
         for c in g.processing:
@@ -118,7 +135,8 @@ class PlayerView:
             self.slash_limit = g.slash_limit(viewer) if g.players[viewer].alive else 0
             self.max_hand = g.max_hand(viewer)
         self.enemy = {s: g.mode.known_enemy(g, viewer, s) for s in range(n)}
-        self.logs = g.visible_logs(viewer) if with_logs else None
+        self.log_entries = g.visible_entries(viewer) if with_logs else None   # 带回合和类型的日志
+        self.logs = [e["text"] for e in self.log_entries] if with_logs else None
         # 技能原文（视角里出现的技能，给提示词用）
         from . import registry as R
         self.skill_text = {s: R.SKILLS[s].description for p in self.players for s in p.skills if s in R.SKILLS}
@@ -169,6 +187,10 @@ class PlayerView:
             raise ValueError("这个视角没有计算距离；用 g.view(seat, derived=True)")
         return a != b and (a, b) in self.distance and self.distance[(a, b)] <= self.attack_range[a]
 
+    def _known_dict(self, c: int) -> Dict[str, Any]:
+        k = self.known_info.get(c)
+        return {"how": k["how"], "turn": k["turn"], "from": k["from"]} if k else {}
+
     def to_dict(self) -> Dict[str, Any]:
         """可 JSON 序列化的视角观察。"""
         def cd(c):
@@ -185,6 +207,10 @@ class PlayerView:
                  "marks": _plain(p.marks)}
             if p.hand is not None:
                 d["hand"] = [cd(c) for c in p.hand]
+            if p.known_hand is not None:
+                d["known_hand"] = [dict(cd(c), **self._known_dict(c)) for c in p.known_hand]
+            if p.known_by:
+                d["known_by"] = {str(s): [cd(c) for c in v] for s, v in p.known_by.items()}
             players.append(d)
         return {
             "viewer": self.viewer, "turn": self.turn, "current": self.current, "phase": self.phase,

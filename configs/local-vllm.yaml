@@ -48,8 +48,9 @@ players:
     # sample_seed: 42                   # 发给服务端的采样种子
 
     # ---- 提示词 ----
-    prompt: default                     # 提示词模板名，或 模块:类名（自己继承 PromptBuilder）
-    history_lines: 40                   # 带最近多少条可见日志
+    prompt: default                     # 提示词模板：default（旧）或 v2（新：已知手牌 + 本回合和上一回合的关键事件），或 模块:类名
+    history_lines: 40                   # default 模板带最近多少条可见日志
+    # prompt_args: {recent_turns: 2, keep_flow: false}   # v2 的参数：近况放几个回合、是否保留流程记录
     ask_reason: false                   # true：要求模型先写理由 {"reason": ..., "action": ...}，理由进数据
     show_skill_text: true               # 附上场上技能和装备的原文
     # extra_rules: "优先保留桃和闪。"     # 追加在系统提示后面的策略提示
@@ -59,7 +60,7 @@ players:
     max_retries: 2                      # 输出不合法时，把错误告诉模型再问几次
     decision_timeout: 300               # 一个决策点总共最多花几秒（含重试），超了就兜底
     fallback: rule                      # 兜底智能体；写 none 表示不兜底、直接中止这局
-    skip_single: true                   # 只有一个选项时不调模型
+    skip_single: true                   # 只有一个选项、或剩下的牌都得选时不调模型
 
   B:
     agent: rule

@@ -151,7 +151,7 @@ def test_llm_agent_skips_single_option(srv):
     ag = make_agent(llm(srv), seed=0)
     g = Game("duel", seed=3, generals=["关羽", "貂蝉"])
     d = Decision(0, "choose", "只有一个选项", [Option(("ok",), "好")])
-    assert ag.choose(g.view(0), d) == 0 and ag.last_info == {"source": "single"} and len(srv.requests) == n0
+    assert ag.choose(g.view(0), d) == 0 and ag.last_info == {"source": "single", "auto": "唯一选项"} and len(srv.requests) == n0
 
 
 # ------------------------------------------------------------------ 对战
@@ -260,9 +260,14 @@ def test_example_configs_load_and_build_agents(name):
     path = os.path.join(ROOT, "configs", name)
     if os.path.isdir(path):
         return
-    cfg = C.load(path)
-    for side in "AB":
-        make_agent(C.agent_spec(cfg["players"][side]), seed=0).close()
+    if "variants" in C.read_file(path):          # 对比实验的配置
+        from sgs import experiment as E
+        cfgs = list(E.load(path)["_configs"].values())
+    else:
+        cfgs = [C.load(path)]
+    for cfg in cfgs:
+        for side in "AB":
+            make_agent(C.agent_spec(cfg["players"][side]), seed=0).close()
 
 
 def test_config_defaults_overrides_and_errors(tmp_path):
@@ -501,3 +506,34 @@ def test_files_are_written_while_playing_and_stop_keeps_them(tmp_path):
     assert traj["result"] == "手动中止（Ctrl+C）" and len(traj["decisions"]) >= len(mid["decisions"])
     assert json.loads((d / "result.json").read_text(encoding="utf-8"))["result"] == "手动中止（Ctrl+C）"
     assert (d / "replay.html").exists() and "## 结果" in (d / "game.md").read_text(encoding="utf-8")
+
+
+def test_auto_decisions_are_marked_in_trajectory(srv, tmp_path):
+    out = tmp_path / "r"
+    run_arena(llm(srv), "rule", games=1, out=str(out), progress="quiet")
+    traj = json.load(open(out / "games" / "0001" / "trajectory.json", encoding="utf-8"))
+    auto = traj["auto_decisions"]
+    assert auto and all(a["auto"] in ("唯一选项", "剩下的牌都要选") for a in auto)
+    steps = {r["step"] for r in traj["decisions"]}
+    assert not steps & {a["step"] for a in auto}
+    calls = json.load(open(out / "games" / "0001" / "llm_calls.json", encoding="utf-8"))
+    assert all(len(c["legal_actions"]) > 1 for c in calls) and calls[0]["template"] == "default"
+
+
+def test_experiment_compares_variants(srv, tmp_path):
+    from sgs import experiment as E
+    sets = ["base.match.games=2", f"base.players.A.base_url={srv.url}", "base.players.A.model=fake",
+            f"dir={tmp_path / 'exp'}", "base.output.progress=quiet"]
+    exp = E.load(os.path.join(ROOT, "configs", "compare-prompts.yaml"), sets)
+    assert list(exp["_configs"]) == ["old", "new"]
+    assert exp["_configs"]["new"]["players"]["A"]["prompt"] == "v2"
+    res = E.run(exp, stream=io.StringIO())
+    rows = json.load(open(tmp_path / "exp" / "comparison.json", encoding="utf-8"))["rows"]
+    assert [r["variant"] for r in rows] == ["old", "new"] and all(r["games"] == 2 for r in rows)
+    assert rows[0]["avg_prompt_tokens"] > rows[1]["avg_prompt_tokens"] > 0
+    assert (tmp_path / "exp" / "new" / "index.html").exists()
+    assert "胜率（95% 区间）" in (tmp_path / "exp" / "comparison.md").read_text(encoding="utf-8")
+    assert res["rows"] == rows
+    with pytest.raises(C.ConfigError):
+        E.load(os.path.join(ROOT, "configs", "compare-prompts.yaml"), ["base.match.games=3"])
+    assert E.wilson(50, 100)[0] < 0.5 < E.wilson(50, 100)[1]

@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from ..base import Agent
+from ..base import Agent, auto_reason
 from .client import ChatClient, ChatError, make_client
 from .parse import parse_action
 from .prompt import PromptBuilder, make_prompt
@@ -48,10 +48,11 @@ class LLMAgent(Agent):
           api_key_env（默认 OPENAI_API_KEY）、timeout（单次请求秒数）、http_retries、backoff、max_retry_after、
           proxy（auto/system/none/代理地址；auto 时本机和内网地址不走代理）、headers、extra_body
     采样：temperature、top_p、max_tokens、stop、sample_seed（发给服务端的采样种子）；seed 只给兜底 AI 用
-    提示词：prompt（模板名）、history_lines、ask_reason、system_prompt、extra_rules、show_skill_text
+    提示词：prompt（模板名：default 或 v2）、history_lines、ask_reason、system_prompt、extra_rules、show_skill_text、
+          prompt_args（交给模板的其它参数，例如 v2 的 {recent_turns: 2, keep_flow: false}）
     容错：max_retries（输出不合法时重问几次）、decision_timeout（一次决策总共最多等几秒）、
           fallback（兜底智能体，默认 rule；写 none 表示不兜底、直接报错）
-    其它：skip_single（只有一个选项时不调模型，默认开）、transcript（JSONL 路径）、label（显示名）
+    其它：skip_single（只有一个选项、或剩下的牌都得选时不调模型，默认开）、transcript（JSONL 路径）、label（显示名）
     """
 
     name = "llm"
@@ -68,7 +69,7 @@ class LLMAgent(Agent):
                  sample_seed: Optional[int] = None,
                  prompt: Union[str, PromptBuilder] = "default", history_lines: int = 40,
                  ask_reason: bool = False, system_prompt: Optional[str] = None, extra_rules: str = "",
-                 show_skill_text: bool = True,
+                 show_skill_text: bool = True, prompt_args: Optional[Dict[str, Any]] = None,
                  max_retries: int = 2, decision_timeout: Optional[float] = 300,
                  fallback: Optional[Any] = "rule", skip_single: bool = True,
                  transcript: Union[None, str, Callable[[Dict[str, Any]], None]] = None,
@@ -84,7 +85,8 @@ class LLMAgent(Agent):
                        "max_tokens": max_tokens, "stop": stop, "seed": sample_seed}
         self.prompt = prompt if isinstance(prompt, PromptBuilder) else make_prompt(
             prompt, history_lines=history_lines, ask_reason=ask_reason, system_prompt=system_prompt,
-            extra_rules=extra_rules, show_skill_text=show_skill_text)
+            extra_rules=extra_rules, show_skill_text=show_skill_text, **(prompt_args or {}))
+        self.prompt_name = prompt if isinstance(prompt, str) else type(prompt).__name__
         self.max_retries = max_retries
         self.decision_timeout = decision_timeout
         self.skip_single = skip_single
@@ -114,8 +116,9 @@ class LLMAgent(Agent):
     # ------------------------------------------------------------- 决策
     def choose(self, view, d) -> int:
         n = len(d.options)
-        if n == 1 and self.skip_single:
-            self.last_info = {"source": "single"}
+        why = auto_reason(d) if self.skip_single else None
+        if why:
+            self.last_info = {"source": "single" if n == 1 else "auto", "auto": why}
             return 0
         self.stats["decisions"] += 1
         labels = [o.label for o in d.options]
@@ -169,7 +172,8 @@ class LLMAgent(Agent):
         if self.sink is not None:
             self.sink({
                 "format": TRANSCRIPT_FORMAT, "game_id": self.game.get("game_id"), "seat": d.player,
-                "agent": self.label, "model": self.model, "step": getattr(view, "step", None),
+                "agent": self.label, "model": self.model, "template": self.prompt_name,
+                "step": getattr(view, "step", None),
                 "turn": view.turn, "phase": view.phase, "kind": d.kind, "prompt": d.prompt,
                 "legal_actions": labels, "attempts": attempts, "action": action,
                 "action_label": labels[action], "source": source, "reason": reason,

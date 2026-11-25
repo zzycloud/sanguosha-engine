@@ -50,7 +50,12 @@ python -m sgs.tools.serve configs/play-vs-model.yaml --human 0     # 网页里�
 # 没有模型也能先跑通：起一个本地假模型
 python -m sgs.tools.fake_llm --port 8001 &
 python -m sgs.arena configs/fake-model.yaml
+# 同一个模型用新旧两套提示词各打规则 AI 100 局，比胜率、答错率、兜底率、token
+python -m sgs.experiment configs/compare-prompts.yaml
 ```
+
+提示词有两套：`default`（局面 + 最近 40 条日志）和 `v2`（局面 + 已知手牌 + 本回合和上一回合的关键事件），
+配置里 `prompt: v2` 切换，区别见 docs/agents.md 的“两套提示词”。
 
 跑完打开输出目录里的 `index.html`：每局一行，点进去是这局的录像（每个决策点下面能展开模型的完整提示词和回复）
 和 `game.md` 文字轨迹；每局的数据都在 `games/0001/` 这样的目录里，按步数对齐。连不上模型或报 HTTP 503 时，
@@ -67,7 +72,7 @@ python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl     # 附每�
 **跑测试和测速**：
 
 ```bash
-python -m pytest                       # 229 个单测
+python -m pytest                       # 248 个单测
 python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
 python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```
@@ -193,6 +198,8 @@ sgs/modes/           游戏模式（duel = 1v1）
 sgs/agents/          智能体接口和注册表、随机 AI、规则 AI、大模型（llm/）
 sgs/arena.py         对战（读配置文件，接模型打、并发、出录像和数据）
 sgs/config.py        配置文件的读取、默认值和覆盖
+sgs/experiment.py    对比实验（同一设置换一个东西各打一轮，出对比表）
+sgs/progress.py      对战时终端里的进度和心跳
 configs/             带注释的示例配置
 sgs/env.py           类 gym 接口
 sgs/export.py        批量导出 JSONL

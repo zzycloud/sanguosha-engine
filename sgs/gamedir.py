@@ -42,7 +42,7 @@ def write_json(path: str, data: Any) -> None:
 
 # ---------------------------------------------------------------------------- Markdown 轨迹
 
-SOURCE_TEXT = {"llm": "模型", "fallback": "兜底（模型没给出合法动作）", "single": "唯一选项"}
+SOURCE_TEXT = {"llm": "模型", "fallback": "兜底（模型没给出合法动作）", "single": "唯一选项", "auto": "不用想（自动）"}
 PHASE_TEXT = {"prepare": "准备阶段", "judge": "判定阶段", "draw": "摸牌阶段", "play": "出牌阶段",
               "discard": "弃牌阶段", "finish": "结束阶段", None: ""}
 KIND_TEXT = {"play": "出牌", "respond": "响应", "trigger": "发动", "choose": "选择"}
@@ -96,6 +96,7 @@ class GameMarkdown:
     def __init__(self, out, info: Dict[str, Any]):
         self.out = out
         self.li = 0
+        self.pending: List[str] = []
         self.turn = None
         gens, sides = info["generals"], info["agents"]
         self._w([f"# 第 {info['game']} 局：{gens[0]}（0 号位，{sides[0]}）对 {gens[1]}（1 号位，{sides[1]}）", "",
@@ -109,9 +110,15 @@ class GameMarkdown:
 
     def _events(self, logs, upto: Optional[int] = None) -> List[str]:
         upto = len(logs) if upto is None else upto
-        evs = [t for t in (log_text(e, None) for e in logs[self.li:upto]) if t]
+        evs = self.pending + [t for t in (log_text(e, None) for e in logs[self.li:upto]) if t]
+        self.pending = []
         self.li = max(self.li, upto)
         return evs
+
+    def auto(self, r: Dict[str, Any], logs: Sequence[Dict[str, Any]]) -> None:
+        """一个没交给智能体、直接选掉的决策：记在下一个决策点的“发生了”里。"""
+        self.pending = self._events(logs, r.get("log_index", self.li))
+        self.pending.append(f"（自动，{r['auto']}）{r['general']}：{r['decision']['prompt']} → {r['action_label']}")
 
     def decision(self, r: Dict[str, Any], logs: Sequence[Dict[str, Any]], calls: Sequence[Dict[str, Any]]) -> None:
         lines: List[str] = []

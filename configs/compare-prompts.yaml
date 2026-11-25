@@ -1,0 +1,31 @@
+# 对比实验：同一个模型分别用旧提示词（default）和新提示词（v2）各打规则 AI 100 局，比胜率、答错率、兜底率、token。
+#   python -m sgs.experiment configs/compare-prompts.yaml
+#   python -m sgs.experiment configs/compare-prompts.yaml --set base.match.games=20      # 先少打几局试试
+#
+# 两个变体用同样的种子：第 k 局双方武将和牌堆完全一样，只有提示词不同。
+# 结果在 runs/compare-prompts-时间/comparison.md，每个变体的录像和模型调用在各自子目录的 index.html。
+# 100 局的胜率 95% 区间大约 ±10%：两组差距比这小时，不要急着下结论，可以加局数。
+
+name: compare-prompts
+dir: runs/{name}-{time}
+side: A                       # 比 A 方（模型）的数据
+
+base:                         # 和普通对战配置的写法一样
+  match:
+    games: 100                # 开着 swap 时要是偶数
+    seed: 0
+    swap: true                # 每两局同一副牌、同一对武将，交换先后手
+    concurrency: 8
+  players:
+    A:
+      include: models/qwen-local.yaml   # 改成你自己的模型
+      ask_reason: false
+    B: rule
+  output:
+    replays: 10               # 每个变体只给前 10 局写录像（录像每局约 1 MB）
+
+variants:
+  old:                        # 旧提示词：局面 + 最近 40 条日志
+    players: {A: {prompt: default, label: 旧提示词}}
+  new:                        # 新提示词：局面 + 已知手牌 + 本回合和上一回合的关键事件
+    players: {A: {prompt: v2, label: 新提示词}}

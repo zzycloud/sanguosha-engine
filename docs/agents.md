@@ -182,16 +182,49 @@ ollama run qwen2.5:7b                                                           
 | `max_retry_after` | 60 | 服务端回了 `Retry-After` 就按它等，但最多等这么久（秒） |
 | `proxy` | `auto` | `auto`：本机和内网地址不走代理，其它按系统代理设置；`none`：不走代理；`system`：完全按系统设置；或写代理地址 |
 | `temperature` / `top_p` / `max_tokens` / `stop` / `sample_seed` | 0.7 / - / - / - / - | 采样参数，没填的不发 |
-| `prompt` | `default` | 提示词模板名或 `模块:类名` |
-| `history_lines` | 40 | 提示词里带最近多少条可见日志（0 不带） |
+| `prompt` | `default` | 提示词模板：`default`（旧）、`v2`（新，见下面“两套提示词”），或 `模块:类名` |
+| `history_lines` | 40 | `default` 模板带最近多少条可见日志（0 不带） |
+| `prompt_args` | | 交给模板的其它参数，例如 v2 的 `{recent_turns: 2, keep_flow: false, max_events: 60}` |
 | `ask_reason` | false | 要求模型输出 `{"reason": ..., "action": ...}`，理由写进数据 |
 | `system_prompt` / `extra_rules` | | 替换系统提示 / 在系统提示后追加文字（例如策略提示） |
 | `show_skill_text` | true | 附上场上技能和装备的原文 |
 | `max_retries` | 2 | 输出不合法时，把错误告诉模型再问几次 |
 | `decision_timeout` | 300 | 一个决策点总共最多花几秒（含重试），超过就兜底 |
 | `fallback` | `rule` | 兜底智能体；`none` 表示不兜底、直接中止这局 |
-| `skip_single` | true | 只有一个选项时不调模型 |
+| `skip_single` | true | 只有一个选项、或剩下的牌都得选（顺序无关）时不调模型 |
 | `label` | `llm:模型名` | 统计和数据里显示的名字 |
+
+## 两套提示词
+
+| | `default`（旧） | `v2`（新） |
+| --- | --- | --- |
+| 局面 | 双方武将、体力、技能原文、装备、判定区、距离、你的手牌、对手手牌数 | 同左，另外：对手手牌里**你确实知道的牌**和来源（“手牌 3 张，其中你知道的：♠7杀（第 1 回合五谷丰登，亮出过）”），以及**对手知道你手里的哪些牌** |
+| 近况 | 最近 40 条可见日志，含“进入出牌阶段”“结束出牌阶段”“回合结束”这类流程记录，往往只够一两个回合 | 只放本回合和上一回合，按回合分组，去掉流程记录，保留出牌、响应和没响应、伤害、回复、获得/失去牌、技能、判定 |
+| 装备说明 | 视角里看得到的所有装备，包括弃牌堆里的 | 只说明场上、你手里和对手已知手牌里的装备 |
+
+已知手牌怎么算见 [data.md 的“已知手牌”](data.md#已知手牌)：只记明面上知道的，不做记牌统计。
+同一批规则 AI 对局里平均每个提示词 v2 比 default 短约 25%，其中近况部分短约 60%。
+v2 的近况可以调回旧方式：`prompt_args: {recent_turns: 0}` 就是最近 `history_lines` 条日志；`keep_flow: true` 保留流程记录。
+
+**不需要想的决策不调模型**：只有一个合法动作，或者剩下的牌都得选（例如刚烈要弃两张而手里正好两张），
+对战时直接选掉，不交给智能体，记在 `trajectory.json` 的 `auto_decisions` 里（`auto` 写原因），game.md 里标“（自动）”。
+
+### 新旧提示词对比
+
+```bash
+python -m sgs.experiment configs/compare-prompts.yaml                          # 默认各打规则 AI 100 局
+python -m sgs.experiment configs/compare-prompts.yaml --set base.match.games=10  # 先少打几局试试
+```
+
+`configs/compare-prompts.yaml` 里 `base` 是一份普通对战配置（改成你的模型），`variants` 下每个变体在它上面覆盖
+（这里只换 `prompt`）。两个变体用同样的种子，第 k 局双方武将和牌堆完全一样。每个变体一个子目录（和普通对战一样有 index.html），
+总目录里 `comparison.md` / `comparison.json` 是对比表：
+
+| 变体 | 局数 | 胜率（95% 区间） | 先手胜 | 答错率 | 兜底率 | 请求失败 | 平均提示 token | 平均回复 token | 平均用时 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+
+答错率 = 答错次数 / 请求次数，兜底率 = 兜底次数 / 模型决策次数，token 是每次请求的平均值（服务端返回的 usage）。
+100 局的胜率 95% 区间大约 ±10%，两组差距比这小时说明不了谁更好，可以加局数。
 
 ## 一次决策发生了什么
 
@@ -211,6 +244,7 @@ ollama run qwen2.5:7b                                                           
 | 字段 | 说明 |
 | --- | --- |
 | `game_id` / `seat` / `step` / `turn` / `phase` | 哪局、哪个座位、第几个决策 |
+| `template` | 用的提示词模板（`default` / `v2`） |
 | `call` / `replay_step` / `decision_step` | 这局第几次模型调用、录像第几步、引擎第几个决策（对齐用） |
 | `concurrency` | 跑这局时同时进行的对局数 |
 | `agent` / `model` | |

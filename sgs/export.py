@@ -38,6 +38,7 @@ def _privileged(g: Game) -> Dict[str, Any]:
     牌 id 对应的牌见 cards 表（导出时写在 <输出>.cards.json，或 card_table(deck)）。"""
     return {
         "hands": {str(p.seat): list(p.hand) for p in g.players},
+        "known": {str(c): sorted(k["by"]) for c, k in g.known.items()},   # 已知手牌：牌 id -> 知道它在谁手里的座位
         "deck_order": list(reversed(g.deck)),
         "discard": list(g.discard),
     }

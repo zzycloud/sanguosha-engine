@@ -96,6 +96,10 @@ class Game:
         self.decisions: List[Dict[str, Any]] = []
         self.steps = 0
         self.queued: List[int] = []  # 失去牌后待触发 lose_card 事件的座位
+        # 已知手牌：手牌里的牌 -> {"by": 知道它在这名角色手里的座位, "how": 怎么来的, "turn", "zone", "from"}。
+        # 牌通过公开途径（亮出、从装备区/判定区/处理区拿、从别人手里拿或被交给）进入手牌时记录，
+        # 牌离开手牌时删除（离开时总是亮出的，所以不需要猜）。摸牌堆的牌只有自己知道，不记。
+        self.known: Dict[int, Dict[str, Any]] = {}
         self.mode.setup(self)
         self.push(self.mode.first_frame(self))
         self.run()
@@ -391,6 +395,7 @@ class Game:
         for p in self.players:
             if cid in p.hand:
                 p.hand.remove(cid)
+                self.known.pop(cid, None)
                 self._after_lose(p.seat, "h")
                 return "h", p.seat
             for slot, c in list(p.equips.items()):
@@ -425,10 +430,30 @@ class Game:
                     self.queued.append(seat)
                 return
 
-    def to_hand(self, seat: int, cids: Sequence[int]) -> None:
+    def to_hand(self, seat: int, cids: Sequence[int], how: str = "", public: bool = False) -> None:
+        """把牌移进 seat 的手牌。how 是来源（技能或牌名，记进已知手牌）；public=True 表示牌是亮出来给所有人看的。
+
+        谁知道这张牌在 seat 手里：seat 自己；牌原来在装备区、判定区、处理区或弃牌堆（公开的地方）时所有人；
+        牌原来在别人手里时还有原主（他知道自己少了哪张）；从牌堆直接拿的只有 seat 自己（除非 public）。"""
+        everyone = set(range(len(self.players)))
         for c in cids:
-            self.remove_card(c)
+            zone, owner = self.remove_card(c)
             self.players[seat].hand.append(c)
+            by = {seat}
+            if public or zone in ("e", "j", "processing", "discard"):
+                by = set(everyone)
+            elif zone == "h" and owner is not None:
+                by.add(owner)
+            if by != {seat}:
+                self.known[c] = {"by": by, "how": how or "获得", "turn": self.turn_count, "zone": zone,
+                                 "from": owner}
+
+    def known_by(self, viewer: int, seat: int) -> List[int]:
+        """seat 手牌里 viewer 知道的牌（按手牌顺序）。viewer == seat 时是全部手牌。"""
+        hand = self.players[seat].hand
+        if viewer == seat:
+            return list(hand)
+        return [c for c in hand if viewer in self.known.get(c, {}).get("by", ())]
 
     def to_discard(self, cids: Sequence[int]) -> None:
         for c in cids:
@@ -484,6 +509,8 @@ class Game:
         }
         if viewer is None or viewer == seat:
             d["hand"] = [self.card_dict(c) for c in p.hand]
+        if viewer is None:
+            d["known_by"] = {str(c): sorted(k["by"]) for c, k in self.known.items() if c in p.hand}
         return d
 
     def observe(self, viewer: Optional[int]) -> Dict[str, Any]:
@@ -531,6 +558,19 @@ class Game:
                 out.append(t)
         return out
 
+    def visible_entries(self, viewer: Optional[int], since: int = 0) -> List[Dict[str, Any]]:
+        """和 visible_logs 一样，但每条带上回合和类型：{"i", "turn", "kind", "text"}（提示词按回合筛选用）。"""
+        out = []
+        for e in self.logs[since:]:
+            t = log_text(e, viewer)
+            if t is not None:
+                r = {"i": e["i"], "turn": e["turn"], "kind": e["kind"], "text": t}
+                seat = (e.get("data") or {}).get("seat")
+                if seat is not None:
+                    r["seat"] = seat
+                out.append(r)
+        return out
+
     def determinize(self, viewer: int, rng: Optional[random.Random] = None) -> "Game":
         """返回一个拷贝：把 viewer 看不到的牌（其他人手牌 + 牌堆）随机重新分配。
         用于隐藏信息下的 rollout。注意：观星等技能带来的牌堆顶信息不会保留。"""
@@ -540,12 +580,17 @@ class Game:
         counts = []
         for p in g.players:
             if p.seat != viewer:
-                counts.append((p.seat, len(p.hand)))
-                unknown.extend(p.hand)
+                keep = g.known_by(viewer, p.seat)       # viewer 知道的手牌留在原处
+                counts.append((p.seat, keep, len(p.hand) - len(keep)))
+                unknown.extend(c for c in p.hand if c not in keep)
         rng.shuffle(unknown)
-        for seat, n in counts:
-            g.players[seat].hand = unknown[:n]
+        for seat, keep, n in counts:
+            g.players[seat].hand = keep + unknown[:n]
+            for c in unknown[:n]:
+                g.known.pop(c, None)
             unknown = unknown[n:]
+        for c in unknown:
+            g.known.pop(c, None)
         g.deck = unknown
         g.rng = random.Random(rng.random())
         return g

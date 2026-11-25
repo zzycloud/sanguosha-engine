@@ -170,7 +170,7 @@ class Progress:
                     g.fallbacks += 1
         if calls and self.level >= 2:
             i = info or {}
-            src = {"llm": "模型", "fallback": "兜底", "single": "唯一选项"}.get(i.get("source"), i.get("source"))
+            src = {"llm": "模型", "fallback": "兜底", "single": "唯一选项", "auto": "自动"}.get(i.get("source"), i.get("source"))
             self.say(f"    第 {g.k} 局 第 {g.turn} 回合 {g.generals[seat]}：{label}（{src}，{i.get('latency')} 秒"
                      + (f"，请求 {i['attempts']} 次" if i.get("attempts", 1) > 1 else "") + "）", 2)
         for c in calls:

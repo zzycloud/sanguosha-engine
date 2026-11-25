@@ -42,6 +42,15 @@ class Agent:
         pass
 
 
+def auto_reason(d) -> Optional[str]:
+    """不需要想的决策：只有一个合法动作，或者剩下的牌都得选（顺序无关）。返回原因，需要想时返回 None。"""
+    if len(d.options) == 1:
+        return "唯一选项"
+    if (d.ctx or {}).get("forced"):
+        return "剩下的牌都要选"
+    return None
+
+
 def decide(agent: Agent, g: Game) -> int:
     """让 agent 在 g 的当前决策点做选择：只把决策者的视角交给它，并检查返回值。"""
     d = g.pending

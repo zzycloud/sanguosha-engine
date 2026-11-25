@@ -476,7 +476,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-si
   }
 
   // ---------- 模型调用（对战输出的录像里才有）----------
-  const SRC = { llm: ["模型给出", "ok"], fallback: ["兜底（模型没给出合法动作）", "bad"], single: ["唯一选项", ""] };
+  const SRC = { llm: ["模型给出", "ok"], fallback: ["兜底（模型没给出合法动作）", "bad"], single: ["唯一选项", ""], auto: ["不用想，自动选", ""] };
   const hasCalls = () => !!(rep && rep.llm_calls && rep.llm_calls.length);
   const isBad = (s) => s.info && (s.info.source === "fallback" || (s.info.errors && s.info.errors.length));
   function msgsHTML(msgs) {
@@ -509,7 +509,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-si
     if (step.agent) tags.push(`<span class="tag">${esc(step.agent)}</span>`);
     if (info.source && SRC[info.source]) tags.push(`<span class="tag ${SRC[info.source][1]}">${SRC[info.source][0]}</span>`);
     if (info.attempts) tags.push(`<span class="tag ${info.attempts > 1 ? "warn" : ""}">请求 ${info.attempts} 次</span>`);
-    if (info.latency !== undefined && info.source !== "single") tags.push(`<span class="tag">${info.latency} 秒</span>`);
+    if (info.latency !== undefined && info.source !== "single" && info.source !== "auto") tags.push(`<span class="tag">${info.latency} 秒</span>`);
     let out = `<div class="agentbox"><div class="tags">${tags.join("")}</div>`;
     if (info.reason) out += `<div class="why">理由：${esc(info.reason)}</div>`;
     for (const e of info.errors || []) out += `<div class="err">${esc(e)}</div>`;

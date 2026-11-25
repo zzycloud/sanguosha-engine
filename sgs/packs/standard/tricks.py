@@ -116,7 +116,7 @@ class TakeCardFrame(Frame):
                 g.log(f"{g.pname(self.user)} 弃置了 {g.pname(self.target)} 的 {g.cstr(cid)}", "discard")
             else:
                 zone, _ = g.locate(cid)
-                g.to_hand(self.user, [cid])
+                g.to_hand(self.user, [cid], self.reason)
                 shown = g.cstr(cid) if zone != "h" else "一张手牌"
                 g.log(f"{g.pname(self.user)} 获得了 {g.pname(self.target)} 的{shown}", "obtain",
                       private={self.user: g.cstr(cid), self.target: g.cstr(cid)} if zone == "h" else None)
@@ -179,7 +179,7 @@ class CollateralFrame(Frame):
             self.stage = 2
             if ans.key == ("give",):
                 w = g.players[a].equips["weapon"]
-                g.to_hand(user, [w])
+                g.to_hand(user, [w], "借刀杀人")
                 g.log(f"{g.pname(a)} 将 {g.cstr(w)} 交给了 {g.pname(user)}", "obtain")
             else:
                 g.push(UseCardFrame(a, ans.data, (b,), {"extra_slash": True}))
@@ -280,7 +280,7 @@ class GraceFrame(Frame):
                            [Option(("card", c), g.cstr(c)) for c in left], {"reason": "五谷丰登"}))
         else:
             cid = g.answer().key[1]
-            g.to_hand(self.target, [cid])
+            g.to_hand(self.target, [cid], "五谷丰登", public=True)
             g.log(f"{g.pname(self.target)} 获得了 {g.cstr(cid)}", "obtain")
             g.done()
 

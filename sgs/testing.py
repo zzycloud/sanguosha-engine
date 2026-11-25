@@ -51,6 +51,7 @@ def give(g: Game, seat: int, *specs: str):
     for s in specs:
         cid = find(g, *_parse(s))
         g.to_hand(seat, [cid])
+        g.known.pop(cid, None)     # 测试里塞进手牌的牌不算谁知道
         out.append(cid)
     g.queued = []
     refresh(g)

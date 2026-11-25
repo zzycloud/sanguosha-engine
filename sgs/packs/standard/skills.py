@@ -44,7 +44,7 @@ class Jianxiong(Skill):
 
     def on_trigger(self, g, owner, event, ev):
         cids = [c for c in ev.card.subcards if c in g.processing]
-        g.to_hand(owner, cids)
+        g.to_hand(owner, cids, "奸雄")
         g.log(f"{g.pname(owner)} 获得了 " + "、".join(g.cstr(c) for c in cids), "obtain")
 
 
@@ -178,7 +178,7 @@ class TuxiFrame(Frame):
                 return
             t = k[1]
             cid = g.rng.choice(g.players[t].hand)
-            g.to_hand(self.owner, [cid])
+            g.to_hand(self.owner, [cid], "突袭")
             self.taken.append(t)
             g.log(f"{g.pname(self.owner)} 获得了 {g.pname(t)} 的一张手牌", "obtain",
                   private={self.owner: g.cstr(cid), t: g.cstr(cid)})
@@ -223,7 +223,7 @@ class Tiandu(Skill):
         return ev.seat == owner and ev.card in g.processing
 
     def on_trigger(self, g, owner, event, ev):
-        g.to_hand(owner, [ev.card])
+        g.to_hand(owner, [ev.card], "天妒")
         g.log(f"{g.pname(owner)} 获得了判定牌 {g.cstr(ev.card)}", "obtain")
 
 
@@ -255,7 +255,7 @@ class YijiFrame(Frame):
             k = g.answer().key
             cid = self.cards.pop(0)
             if k[1] != self.owner and cid in g.players[self.owner].hand:
-                g.to_hand(k[1], [cid])
+                g.to_hand(k[1], [cid], "遗计")
                 g.log(f"{g.pname(self.owner)} 将一张牌交给 {g.pname(k[1])}", "give",
                       private={self.owner: g.cstr(cid), k[1]: g.cstr(cid)})
         elif self.stage == 3:
@@ -325,7 +325,7 @@ class LuoshenFrame(Frame):
                 g.done()
                 return
             if g.locate(cid)[0] in ("discard", "processing"):
-                g.to_hand(self.owner, [cid])
+                g.to_hand(self.owner, [cid], "洛神")
                 g.log(f"{g.pname(self.owner)} 获得了 {g.cstr(cid)}", "obtain")
             self.stage = 2
             g.ask(yes_no(self.owner, "是否继续发动【洛神】？", {"skill": "洛神"}))
@@ -364,7 +364,7 @@ class RendeFrame(Frame):
                                "仁德：交给谁？", {"skill": "仁德"}))
         else:
             t = g.ret[1]
-            g.to_hand(t, self.cards)
+            g.to_hand(t, self.cards, "仁德")
             g.log(f"{g.pname(self.owner)} 将 {len(self.cards)} 张手牌交给 {g.pname(t)}", "give",
                   private={self.owner: "、".join(g.cstr(c) for c in self.cards),
                            t: "、".join(g.cstr(c) for c in self.cards)})
@@ -647,7 +647,7 @@ class FanjianFrame(Frame):
                 g.done()
                 return
             cid = g.rng.choice(hand)
-            g.to_hand(self.target, [cid])
+            g.to_hand(self.target, [cid], "反间", public=True)
             g.log(f"{g.pname(self.target)} 选择 {suit}，获得并展示了 {g.cstr(cid)}", "obtain")
             self.stage = 3
             if g.cards[cid].suit != suit:

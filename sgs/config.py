@@ -122,10 +122,12 @@ def _check_keys(section: str, got: Dict[str, Any], allowed: Dict[str, Any]) -> N
         raise ConfigError(f"{section} 里有不认识的字段：{', '.join(bad)}；可用：{', '.join(allowed)}")
 
 
-def load(path: Optional[str] = None, sets: Sequence[str] = (), data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """读配置文件（或直接给 data），合并默认值和 --set 覆盖，检查字段。"""
+def load(path: Optional[str] = None, sets: Sequence[str] = (), data: Optional[Dict[str, Any]] = None,
+         base_dir: Optional[str] = None) -> Dict[str, Any]:
+    """读配置文件（或直接给 data），合并默认值和 --set 覆盖，检查字段。
+    base_dir：include 的相对路径从哪里算（默认是配置文件所在目录，没有文件时是当前目录）。"""
     raw: Dict[str, Any] = {}
-    base_dir = os.getcwd()
+    base_dir = base_dir or os.getcwd()
     if path:
         raw = read_file(path)
         base_dir = os.path.dirname(os.path.abspath(path))

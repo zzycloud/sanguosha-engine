@@ -30,7 +30,7 @@ import traceback
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any, Dict, List, Optional, Sequence
 
-from .agents.base import decide
+from .agents.base import auto_reason, decide
 from .agents.llm.agent import JsonlSink
 from . import config as C
 from . import gamedir as GD
@@ -118,6 +118,7 @@ def play_one(k: int, seed: int, specs: Sequence[Any], seats: Sequence[int], gene
     dl = DecisionLog(g, game_id, names, rollouts, history, privileged)
     dname = f"{GD.GAMES_DIR}/{GD.game_dirname(k)}" if game_dir else None
     md = traj_w = calls_w = md_file = None
+    auto_rows: List[Dict[str, Any]] = []
     meta = {"format": "sgs-trajectory/1", "game": k, "game_id": game_id, "seed": seed, "mode": mode,
             "generals": gens, "agents": names}
     if game_dir:
@@ -133,7 +134,9 @@ def play_one(k: int, seed: int, specs: Sequence[Any], seats: Sequence[int], gene
                     replay="replay.html" if (finished and replay) else None,
                     note="decisions 里每项是一个需要选择的决策点（决策者视角）；replay_step 对应录像第几步，"
                          "llm_calls 是 llm_calls.json 里的下标",
-                    decisions=dl.rows)
+                    decisions=dl.rows,
+                    auto_note="auto_decisions 是没交给智能体、直接选掉的决策（只有一个合法动作，或剩下的牌都得选）",
+                    auto_decisions=auto_rows)
 
     if on_start is not None:
         on_start(_placeholder(k, seed, gens, seats, names, dname))
@@ -161,8 +164,21 @@ def play_one(k: int, seed: int, specs: Sequence[Any], seats: Sequence[int], gene
                 break
             gs.turn = g.turn_count
             d = g.pending
-            if len(d.options) == 1:
+            why = auto_reason(d)
+            if why:
+                # 不需要想的决策：不交给智能体，直接选第一个，在轨迹里记一笔 auto
+                arow = {"step": len(g.decisions), "replay_step": len(rec.steps), "log_index": len(g.logs),
+                        "turn": g.turn_count, "phase": g.phase, "player": d.player,
+                        "general": g.players[d.player].general, "auto": why,
+                        "decision": {"kind": d.kind, "prompt": d.prompt},
+                        "legal_actions": [o.label for o in d.options], "action": 0,
+                        "action_label": d.options[0].label}
+                auto_rows.append(arow)
                 rec.act(0)
+                if len(d.options) > 1:
+                    rec.steps[arow["replay_step"]]["info"] = {"source": "auto", "auto": why}
+                if md is not None and len(d.options) > 1:
+                    md.auto(arow, g.logs)
             else:
                 row = dl.before()
                 rs = len(rec.steps)                 # 这个决策在录像里是第几步

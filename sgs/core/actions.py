@@ -223,7 +223,10 @@ class SelectCardsFrame(Frame):
         if len(self.chosen) >= self.min_n:
             opts.append(Option(("stop",), "确定" if self.chosen else "不选"))
         prompt = f"{self.prompt}（已选 {len(self.chosen)}）" if self.chosen else self.prompt
-        g.ask(Decision(self.seat, "choose", prompt, opts, dict(self.ctx, chosen=list(self.chosen))))
+        ctx = dict(self.ctx, chosen=list(self.chosen))
+        if self.min_n - len(self.chosen) >= len(rest):
+            ctx["forced"] = True        # 剩下的牌都得选，选哪张先都一样：智能体可以不用想
+        g.ask(Decision(self.seat, "choose", prompt, opts, ctx))
 
 
 class DiscardFrame(Frame):
@@ -777,6 +780,8 @@ class DeathFrame(Frame):
             trigger(g, "death", Ev(seat=self.seat, killer=self.killer))
             return
         cards = list(p.hand) + list(p.equips.values()) + [c for c, _ in p.judges]
+        for c in p.hand:
+            g.known.pop(c, None)
         p.hand, p.equips, p.judges = [], {}, []
         g.discard.extend(cards)
         g.done()

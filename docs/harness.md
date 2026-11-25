@@ -35,7 +35,7 @@ arena.play_one(种子, 座位)
   ├─ Recorder.new_game(mode, seed, generals)           引擎每写一条日志，录像多一步
   └─ while 没结束:
        d = g.pending                                   引擎停在一个决策点
-       只有一个选项 → 直接选
+       只有一个选项，或剩下的牌都得选 → 直接选，记进 auto_decisions
        否则:
          row = DecisionLog.before()                    记下决策者视角（导出用）
          i = decide(agents[d.player], g)
@@ -58,6 +58,7 @@ arena.play_one(种子, 座位)
 1. **引擎**：规则全部在引擎里，包括“锁定技强制、非锁定技必问”这类通用规则；对外只暴露“当前决策点 + 选第几个”。
    状态可以复制，所以 rollout、MCTS、数据标注都在同一套引擎上做。
 2. **观察接口**：`PlayerView` 是快照，不持有 `Game`，看不见的牌一查就报错，从结构上防止“偷看”。
+   引擎记录已知手牌（谁通过公开途径知道某张牌在谁手里），视角里给 `known_hand` / `known_by`，详见 data.md。
    `view.to_dict()` 是 JSON 版，`d.options[i].key` 是结构化动作编码，`label` 是给人和模型看的文字。
 3. **智能体**：只有一个方法 `choose(view, d)`，外加可选的每局开始 / 结束钩子。
    需要日志、距离等额外信息时声明 `needs_history` / `needs_derived`，引擎才去算。
@@ -76,7 +77,8 @@ arena.play_one(种子, 座位)
 | `match.games / swap / concurrency / game_timeout / max_steps` | `arena.run_arena` 的调度参数 |
 | `players.X.agent` | 注册表 `make_agent` 选哪个智能体类 |
 | `players.X` 其它字段 | 原样传给该智能体的构造函数（`llm` 的字段分给 `ChatClient`、`PromptBuilder` 和 `LLMAgent` 自己） |
-| `players.X.client / prompt` | `ChatClient` / `PromptBuilder` 注册表里的名字 |
+| `players.X.client / prompt` | `ChatClient` / `PromptBuilder` 注册表里的名字（提示词有 `default` 和 `v2`，见 agents.md“两套提示词”） |
+| 对比实验（`sgs.experiment`） | `base` 是一份对战配置，`variants` 每项覆盖一部分，依次跑 `run_config`，最后出对比表 |
 | `output.*` | 输出目录、是否每局一个目录、写几局录像、是否另外写合并 JSONL、rollout 估值和导出字段 |
 
 ## 扩展点
