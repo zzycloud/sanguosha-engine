@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from ..base import Agent, auto_reason
 from .client import ChatClient, ChatError, make_client
 from .parse import parse_action
+from .addons import wrap_prompt
 from .prompt import PromptBuilder, make_prompt
 
 TRANSCRIPT_FORMAT = "sgs-llm-call/1"
@@ -50,6 +51,8 @@ class LLMAgent(Agent):
     采样：temperature、top_p、max_tokens、stop、sample_seed（发给服务端的采样种子）；seed 只给兜底 AI 用
     提示词：prompt（模板名：default 或 v2）、history_lines、ask_reason、system_prompt、extra_rules、show_skill_text、
           prompt_args（交给模板的其它参数，例如 v2 的 {recent_turns: 2, keep_flow: false}）
+    可选加料（见 addons.py，都不开时提示词和原来一样）：tips（武将技巧：true / 目录 / {dir, self, opponent}）、
+          cot（思维链：off / key / all）、cot_max_chars（分析最多几个字）、cot_key（换“关键决策”的判断：模块:函数）
     容错：max_retries（输出不合法时重问几次）、decision_timeout（一次决策总共最多等几秒）、
           fallback（兜底智能体，默认 rule；写 none 表示不兜底、直接报错）
     其它：skip_single（只有一个选项、或剩下的牌都得选时不调模型，默认开）、transcript（JSONL 路径）、label（显示名）
@@ -70,6 +73,7 @@ class LLMAgent(Agent):
                  prompt: Union[str, PromptBuilder] = "default", history_lines: int = 40,
                  ask_reason: bool = False, system_prompt: Optional[str] = None, extra_rules: str = "",
                  show_skill_text: bool = True, prompt_args: Optional[Dict[str, Any]] = None,
+                 tips: Any = None, cot: Any = "off", cot_max_chars: int = 150, cot_key: Any = None,
                  max_retries: int = 2, decision_timeout: Optional[float] = 300,
                  fallback: Optional[Any] = "rule", skip_single: bool = True,
                  transcript: Union[None, str, Callable[[Dict[str, Any]], None]] = None,
@@ -86,6 +90,8 @@ class LLMAgent(Agent):
         self.prompt = prompt if isinstance(prompt, PromptBuilder) else make_prompt(
             prompt, history_lines=history_lines, ask_reason=ask_reason, system_prompt=system_prompt,
             extra_rules=extra_rules, show_skill_text=show_skill_text, **(prompt_args or {}))
+        self.prompt = wrap_prompt(self.prompt, tips=tips, cot=cot, cot_max_chars=cot_max_chars, cot_key=cot_key)
+        self._parse = getattr(self.prompt, "parse", None) or parse_action
         self.prompt_name = prompt if isinstance(prompt, str) else type(prompt).__name__
         self.max_retries = max_retries
         self.decision_timeout = decision_timeout
@@ -100,7 +106,7 @@ class LLMAgent(Agent):
         self.game: Dict[str, Any] = {}
         self.stats = {"decisions": 0, "llm_calls": 0, "illegal": 0, "errors": 0, "fallbacks": 0,
                       "latency": 0.0, "prompt_tokens": 0, "completion_tokens": 0,
-                      "error_kinds": {}}
+                      "error_kinds": {}, "cot_decisions": 0}
 
     # ------------------------------------------------------------- 生命周期
     def on_game_start(self, info):
@@ -123,9 +129,12 @@ class LLMAgent(Agent):
         self.stats["decisions"] += 1
         labels = [o.label for o in d.options]
         messages = self.prompt.messages(view, d)
+        cot = bool(getattr(self.prompt, "last_cot", False))
+        if cot:
+            self.stats["cot_decisions"] += 1
         attempts: List[Dict[str, Any]] = []
         t0 = time.perf_counter()
-        action = reason = None
+        action = reason = analysis = None
         source = "fallback"
         for k in range(self.max_retries + 1):
             if self.decision_timeout and time.perf_counter() - t0 > self.decision_timeout:
@@ -145,17 +154,23 @@ class LLMAgent(Agent):
             self.stats["latency"] += r.latency
             for key in ("prompt_tokens", "completion_tokens"):
                 self.stats[key] += int((r.usage or {}).get(key) or 0)
-            i, err, why = parse_action(r.text, n, labels)
+            i, err, why = self._parse(r.text, n, labels)
             rec.update(request={k2: v for k2, v in r.request.items() if k2 != "messages"},
                        response=r.response, text=r.text, reasoning=r.reasoning, latency=round(r.latency, 4),
                        usage=r.usage, http_attempts=r.http_attempts, parsed=i, error=err)
+            if cot:
+                rec["analysis"] = why
             if r.extra.get("http"):
                 rec["http"] = r.extra["http"]       # 中间重试过：每次尝试的状态码、响应头、等待时间
             if err is not None:
                 rec["error_kind"] = "illegal"
             attempts.append(rec)
             if err is None:
-                action, reason, source = i, why, "llm"
+                action, source = i, "llm"
+                if cot:
+                    analysis = why
+                else:
+                    reason = why
                 break
             self.stats["illegal"] += 1
             messages = messages + [{"role": "assistant", "content": r.text or ""}, self.prompt.retry(err, n)]
@@ -166,6 +181,7 @@ class LLMAgent(Agent):
                 raise RuntimeError(f"{self.label} 没能给出合法动作：{last}")
             action = self.fallback.choose(view, d)
         self.last_info = {"source": source, "attempts": len(attempts), "reason": reason,
+                          **({"cot": True, "analysis": analysis} if cot else {}),
                           "latency": round(time.perf_counter() - t0, 4),
                           "errors": [a["error"] for a in attempts if a.get("error")],
                           "error_kinds": [a["error_kind"] for a in attempts if a.get("error_kind")]}
@@ -173,10 +189,12 @@ class LLMAgent(Agent):
             self.sink({
                 "format": TRANSCRIPT_FORMAT, "game_id": self.game.get("game_id"), "seat": d.player,
                 "agent": self.label, "model": self.model, "template": self.prompt_name,
+                **({"addons": self.prompt.describe()} if hasattr(self.prompt, "describe") else {}),
                 "step": getattr(view, "step", None),
                 "turn": view.turn, "phase": view.phase, "kind": d.kind, "prompt": d.prompt,
                 "legal_actions": labels, "attempts": attempts, "action": action,
                 "action_label": labels[action], "source": source, "reason": reason,
+                **({"cot": True, "analysis": analysis} if cot else {}),
                 "concurrency": self.game.get("concurrency"),
             })
         return action

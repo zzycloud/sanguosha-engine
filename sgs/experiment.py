@@ -93,6 +93,8 @@ def row(name: str, s: Dict[str, Any], side: str) -> Dict[str, Any]:
         "avg_prompt_tokens": round(L.get("prompt_tokens", 0) / req, 1) if req else None,
         "avg_completion_tokens": round(L.get("completion_tokens", 0) / req, 1) if req else None,
         "avg_latency": L.get("avg_latency"), "seconds": s.get("seconds"),
+        "prompt_tokens": L.get("prompt_tokens", 0), "completion_tokens": L.get("completion_tokens", 0),
+        "cot_decisions": L.get("cot_decisions", 0),
     }
 
 
@@ -101,15 +103,18 @@ def pct(x: Optional[float]) -> str:
 
 
 def table(rows: List[Dict[str, Any]]) -> str:
-    head = ["变体", "局数", "胜率（95% 区间）", "先手胜", "答错率", "兜底率", "请求失败", "平均提示 token", "平均回复 token", "平均用时"]
+    head = ["变体", "局数", "胜率（95% 区间）", "先手胜", "解析失败率", "兜底率", "请求失败", "决策 / 先分析 / 请求",
+            "平均提示 token", "平均回复 token", "总 token", "平均用时"]
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for r in rows:
         lo, hi = r["win_rate_ci95"]
         lines.append("| " + " | ".join(str(x) for x in [
             r["variant"], r["games"], f"{pct(r['win_rate'])}（{pct(lo)}～{pct(hi)}）",
             f"{r['wins_first']}/{r['games_first']}", pct(r["illegal_rate"]), pct(r["fallback_rate"]),
-            r["request_errors"], r["avg_prompt_tokens"] if r["avg_prompt_tokens"] is not None else "-",
+            r["request_errors"], f"{r['decisions']} / {r.get('cot_decisions', 0)} / {r['requests']}",
+            r["avg_prompt_tokens"] if r["avg_prompt_tokens"] is not None else "-",
             r["avg_completion_tokens"] if r["avg_completion_tokens"] is not None else "-",
+            r.get("prompt_tokens", 0) + r.get("completion_tokens", 0),
             f"{r['avg_latency']} 秒" if r["avg_latency"] is not None else "-"]) + " |")
     return "\n".join(lines)
 
@@ -137,7 +142,8 @@ def _write(top: str, exp: Dict[str, Any], rows: List[Dict[str, Any]]) -> None:
         json.dump({"name": exp["name"], "side": exp["side"], "rows": rows}, f, ensure_ascii=False, indent=2)
     with open(os.path.join(top, "comparison.md"), "w", encoding="utf-8") as f:
         f.write(f"# {exp['name']}\n\n比的是 {exp['side']} 方（{rows[0]['agent']}，对手 {rows[0]['opponent']}）。"
-                "答错率 = 答错次数 / 请求次数；兜底率 = 兜底次数 / 模型决策次数；token 是每次请求的平均值。\n\n")
+                "解析失败率 = 没解析出合法编号的请求 / 请求次数（失败后会重问，还不行才兜底）；兜底率 = 交给规则 AI 的决策 / 模型决策次数；"
+                "“先分析”是开了思维链、要求先写分析的决策数；平均 token 是每次请求的，总 token 是这一组全部请求加起来。\n\n")
         f.write(table(rows) + "\n\n")
         for r in rows:
             f.write(f"- {r['variant']}：[{r['variant']}/index.html]({r['variant']}/index.html)\n")

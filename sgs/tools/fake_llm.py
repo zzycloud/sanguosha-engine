@@ -12,6 +12,8 @@
   fake-500            永远返回 HTTP 500（测网络重试和兜底）
   fake-503            永远返回空内容的 HTTP 503，带 Retry-After: 1（模拟代理或网关挡住了请求，看诊断信息长什么样）
   fake-slow           先等 --slow 秒再回答（测超时）
+  fake-cot            题目要求先分析时回“分析：……”加最后一行 JSON，否则只回 JSON（测思维链）
+  fake-cot-bad        要求先分析时第一次只写分析不给编号（测思维链的解析失败、重试和计数）
 
 --delay N 让所有模型每次都先等 N 秒左右，模拟真模型的速度，用来看终端进度和心跳。
 """
@@ -43,6 +45,12 @@ def _answer(model: str, messages: List[Dict[str, str]]) -> str:
         return json.dumps({"action": n + 3})
     if model == "fake-flaky" and not retried:
         return "嗯……这个问题很复杂"
+    if model in ("fake-cot", "fake-cot-bad"):
+        if any("先写“分析：”" in (m.get("content") or "") for m in messages if m.get("role") == "user"):
+            if model == "fake-cot-bad" and not retried:
+                return f"分析：一共 {n} 个选项，选 {k} 不错，不过我还没想好……"
+            return f"分析：一共 {n} 个选项，选 1 和选 {k} 差不多，选 {k}。\n{json.dumps({'action': k})}"
+        return json.dumps({"action": k})
     if model == "fake-think":
         return f"<think>一共 {n} 个选项，我选 {k}。</think>\n{ok}"
     return ok
@@ -78,7 +86,7 @@ class FakeLLMServer:
 
             def do_GET(self):
                 if self.path.rstrip("/").endswith("/models"):
-                    names = ["fake", "fake-think", "fake-flaky", "fake-bad", "fake-range", "fake-500", "fake-503", "fake-slow"]
+                    names = ["fake", "fake-cot", "fake-cot-bad", "fake-think", "fake-flaky", "fake-bad", "fake-range", "fake-500", "fake-503", "fake-slow"]
                     return self._send(200, {"object": "list", "data": [{"id": x, "object": "model"} for x in names]})
                 self._send(404, {"error": "not found"})
 

@@ -57,6 +57,11 @@ python -m sgs.experiment configs/compare-prompts.yaml
 提示词有两套：`default`（局面 + 最近 40 条日志）和 `v2`（局面 + 已知手牌 + 本回合和上一回合的关键事件），
 配置里 `prompt: v2` 切换，区别见 docs/agents.md 的“两套提示词”。
 
+提示词上还能加两样，各自单独开关，不开时提示词和原来一样（见 [docs/tips-cot.md](docs/tips-cot.md)）：
+`tips: true` 把自己武将的实战技巧（`configs/tips/武将名.md`，你自己写）放进提示词；
+`cot: key` 让模型在关键决策（发动技能、卖血、拆顺选牌、弃牌）先写一段分析再给编号，`cot: all` 每个决策都分析。
+四组对比（无 / 技巧 / 分析 / 两者）：`python -m sgs.experiment configs/compare-tips-cot.yaml`。
+
 跑完打开输出目录里的 `index.html`：每局一行，点进去是这局的录像（每个决策点下面能展开模型的完整提示词和回复）
 和 `game.md` 文字轨迹；每局的数据都在 `games/0001/` 这样的目录里，按步数对齐。连不上模型或报 HTTP 503 时，
 先跑一次 `python -m sgs.arena 你的配置.yaml --check`，排查说明见 docs/agents.md。
@@ -81,7 +86,7 @@ python -m sgs_data.evalbank configs/data/evalbank.yaml --set bank=runs/data-demo
 **跑测试和测速**：
 
 ```bash
-python -m pytest                       # 265 个单测
+python -m pytest                       # 283 个单测
 python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
 python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```

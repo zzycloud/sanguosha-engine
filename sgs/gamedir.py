@@ -148,6 +148,8 @@ class GameMarkdown:
                 lines.append(f"答错或失败：{'；'.join(ai['errors'])}")
             if ai.get("reason"):
                 lines.append(f"模型给的理由：{ai['reason']}")
+            if ai.get("analysis"):
+                lines.append(f"模型的分析：{ai['analysis']}")
         else:
             lines.append(f"来源：{who}")
         lines.append("")

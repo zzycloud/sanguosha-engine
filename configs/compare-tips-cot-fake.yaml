@@ -1,0 +1,17 @@
+# 不花钱的试跑：同样四组，模型换成假模型，只看流程通不通、输出长什么样。
+#   uv run python -m sgs.tools.fake_llm --port 8001        # 另一个终端先起假模型
+#   uv run python -m sgs.experiment configs/compare-tips-cot-fake.yaml
+name: compare-tips-cot-fake
+dir: runs/{name}-{time}
+side: A
+base:
+  match: {games: 2, seed: 0, swap: true, concurrency: 2, general_pool: [郭嘉, 诸葛亮, 司马懿, 甄姬]}
+  players:
+    A: {agent: llm, base_url: "http://127.0.0.1:8001/v1", model: fake-cot, prompt: v2, tips: false, cot: "off"}
+    B: rule
+  output: {replays: all, connect_check: true}
+variants:
+  none: {players: {A: {label: 无技巧无分析}}}
+  tips: {players: {A: {label: 技巧, tips: true}}}
+  cot: {players: {A: {label: 关键分析, cot: key}}}
+  both: {players: {A: {label: 技巧加关键分析, tips: true, cot: key}}}

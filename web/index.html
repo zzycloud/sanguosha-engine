@@ -508,10 +508,12 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-si
     const tags = [];
     if (step.agent) tags.push(`<span class="tag">${esc(step.agent)}</span>`);
     if (info.source && SRC[info.source]) tags.push(`<span class="tag ${SRC[info.source][1]}">${SRC[info.source][0]}</span>`);
+    if (info.cot) tags.push(`<span class="tag">先分析</span>`);
     if (info.attempts) tags.push(`<span class="tag ${info.attempts > 1 ? "warn" : ""}">请求 ${info.attempts} 次</span>`);
     if (info.latency !== undefined && info.source !== "single" && info.source !== "auto") tags.push(`<span class="tag">${info.latency} 秒</span>`);
     let out = `<div class="agentbox"><div class="tags">${tags.join("")}</div>`;
     if (info.reason) out += `<div class="why">理由：${esc(info.reason)}</div>`;
+    if (info.analysis) out += `<div class="why">分析：${esc(info.analysis)}</div>`;
     for (const e of info.errors || []) out += `<div class="err">${esc(e)}</div>`;
     for (const ci of step.calls || []) {
       const c = rep.llm_calls[ci];

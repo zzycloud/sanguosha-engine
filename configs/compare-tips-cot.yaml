@@ -1,0 +1,52 @@
+# 强模型 + 武将技巧 + 思维链：同一个模型、同一批种子，四组各打规则 AI，比胜率。
+#
+#   export MY_API_KEY=你的密钥                      # 先改 configs/models/strong-api.yaml 里的 base_url 和 model
+#   uv run python -m sgs.experiment configs/compare-tips-cot.yaml
+#   uv run python -m sgs.experiment configs/compare-tips-cot.yaml --set base.match.games=50   # 放大到每组 50 局
+#
+# 四组：none（什么都不加）/ tips（加自己武将的技巧）/ cot（关键决策先分析）/ both（两个都加）。
+# 每组第 k 局的武将和牌堆完全一样，只有提示词不同。
+# 结果：runs/compare-tips-cot-时间/comparison.md（胜率和 95% 区间、解析失败率、兜底率、请求次数、token），
+# 每组子目录的 index.html 能点进每局看录像；开了思维链的决策，录像里会显示模型的“分析”。
+#
+# 花钱估算：每局 30～80 个模型决策。思维链只在关键决策上写分析，回复 token 会多一些。
+# 每组 10 局时，10 局的 95% 区间大约 ±30%，只能看出很大的差距；想下结论用 50 局以上。
+
+name: compare-tips-cot
+dir: runs/{name}-{time}
+side: A
+
+base:
+  match:
+    games: 10                 # 开着 swap 要是偶数
+    seed: 0
+    swap: true                # 每两局同一副牌、同一对武将，交换先后手
+    concurrency: 4
+    # 只从写了技巧的武将里抽，这样模型每局都用得上技巧；想用全部武将就删掉这一行
+    general_pool: [郭嘉, 诸葛亮, 司马懿, 甄姬]
+  players:
+    A:
+      include: models/strong-api.yaml
+      prompt: v2
+      temperature: 0.3
+      max_tokens: 1024        # 思维链组回复会变长，留够
+      tips: false
+      cot: "off"
+    B: rule
+  output:
+    replays: all
+
+variants:
+  none:
+    players: {A: {label: 无技巧无分析}}
+  tips:
+    players: {A: {label: 技巧, tips: {dir: configs/tips, self: true, opponent: false}}}
+  cot:
+    players: {A: {label: 关键分析, cot: key}}
+  both:
+    players: {A: {label: 技巧加关键分析, tips: {dir: configs/tips, self: true, opponent: false}, cot: key}}
+  # 想再试“每个决策都分析”或“对手技巧也给”，照着加一组：
+  # cot_all:
+  #   players: {A: {label: 全部分析, cot: all}}
+  # tips_opp:
+  #   players: {A: {label: 双方技巧, tips: {dir: configs/tips, opponent: true}}}
