@@ -1,0 +1,40 @@
+# 造数据：小批量试跑（全用规则 AI，不调模型，几分钟跑完）。
+#
+#   python -m sgs_data configs/data/demo.yaml
+#   python -m sgs_data configs/data/demo.yaml --set key.test_per_scenario=5     # 覆盖某一项
+#
+# 输出在 runs/data-demo-时间/：sft.jsonl、dpo.jsonl、test.jsonl（题库）、review.md（给人看）、stats.md（统计）。
+# 字段含义和取舍见 docs/data-gen.md。
+
+name: demo
+workers: 4                    # 并行进程数（模拟者是模型时变成并发线程数）
+
+prompt:                       # sft/dpo 里的提示词模板，要和你推理时用的一样
+  name: v2
+  args: {recent_turns: 2}
+
+rollout:                      # 往下模拟打标签
+  policy: rule+               # 双方用谁往下打：rule+（规则 AI + 观星避闪电）/ rule / 你的模型（见 full.yaml）
+  n_min: 32                   # 每组选项至少模拟 32 个随机世界
+  n_max: 96                   # 说不清时最多加到 96 个
+  margin: 0.06                # 胜率差小于 6% 算“差不多”
+  z: 2.0                      # 差值要超过 2 倍标准误才算“明显更差”
+
+key:                          # 关键局面：模板名: 训练题数
+  scenarios:
+    guojia_sell_hp: 40
+    guojia_yiji_kongcheng: 30
+    zhuge_kongcheng: 30
+    zhuge_lightning: 30
+    simayi_fankui: 30
+    zhenji_discard: 30
+  test_per_scenario: 10       # 每个模板的题库题（种子和训练题分开）
+
+normal:                       # 普通局面：正常打几局，每局随机抽几个需要想的决策点
+  games: 40
+  per_game: 4
+  players: {A: rule+, B: rule+}
+
+mix:
+  key_share: 0.3              # 训练集里关键局面占 30%，普通局面 70%
+  max_tag_share: 0.7          # 每个模板里任何一种答案最多占 70%（保证有反例）

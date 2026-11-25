@@ -1,0 +1,9 @@
+# 用题库考一个模型。bank 写造数据输出目录里的 test.jsonl。
+#
+#   python -m sgs_data.evalbank configs/data/evalbank.yaml --set bank=runs/data-demo-xxxx/test.jsonl
+#
+# 结果在 runs/evalbank-evalbank-时间/results.md：总正确率、每个模板、每种答案的正确率，和模型选的答案分布。
+
+bank: runs/data-demo/test.jsonl
+player: {include: ../models/qwen-local.yaml}    # 也可以写 rule / rule+ 看基线
+concurrency: 8

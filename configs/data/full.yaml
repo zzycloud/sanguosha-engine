@@ -1,0 +1,57 @@
+# 造数据：正式跑。模拟用规则 AI（快、免费），你的强模型当裁判（每题问 5 次）。
+#
+#   export MY_API_KEY=sk-...                 # 强模型的密钥只放环境变量
+#   python -m sgs_data configs/data/full.yaml
+#
+# 先用 --set key.scenarios.guojia_sell_hp=20 之类的小数跑一遍，看 stats.md 里每类题留下多少、review.md 里答案对不对，再放大。
+# 想让模拟本身更强：把 rollout.policy 换成你的模型（下面注释掉的写法），但会慢很多，见 docs/data-gen.md“谁来往下打”。
+
+name: full
+workers: 8
+
+prompt:
+  name: v2
+  args: {recent_turns: 2}
+
+rollout:
+  policy: rule+
+  # policy: {include: ../models/qwen-local.yaml, temperature: 0.7}   # 用你的模型往下打（慢）
+  # max_turns_ahead: 4                                               # 配合模型模拟：只往下打 4 个回合，之后按体力手牌粗估
+  n_min: 32
+  n_max: 128
+  margin: 0.06
+  z: 2.0
+
+key:
+  scenarios:
+    guojia_sell_hp: 800
+    guojia_yiji_kongcheng: 500
+    zhuge_kongcheng: 600
+    zhuge_lightning: 500
+    simayi_fankui: 500
+    zhenji_discard: 600
+  test_per_scenario: 40
+  test_rollout: {n_min: 64, n_max: 256}
+
+normal:
+  games: 1500
+  per_game: 6
+  players:
+    A: rule+
+    B: rule+
+    # A: {include: ../models/qwen-local.yaml}    # 用你的模型打这些局，抽到的局面更像它真会遇到的
+  rollout: {n_min: 16, n_max: 64}
+
+judge:                        # 强模型当裁判：和模拟结论不一致的题不进训练，写进 review.md
+  enabled: true
+  player: {include: ../models/strong-api.yaml}
+  votes: 5
+  scope: confident            # 只问模拟有结论的题（all：全问）
+  on_disagree: review
+  concurrency: 8
+
+mix:
+  key_share: 0.3
+  max_tag_share: 0.7
+  max_general_share: 0.25
+  dpo_pairs_per_item: 2

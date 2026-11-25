@@ -69,10 +69,19 @@ python -m sgs.export --games 10000 --workers 8 --no-privileged -o data/big.jsonl
 python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl     # 附每个动作的 rollout 估值
 ```
 
+**造训练数据（关键局面 + 普通局面，往下模拟打标签，导出 SFT / DPO / 题库）**，
+详见 [docs/data-gen.md](docs/data-gen.md)：
+
+```bash
+python -m sgs_data configs/data/demo.yaml          # 规则 AI 模拟，几分钟
+python -m sgs_data configs/data/full.yaml          # 正式跑：强模型当裁判（密钥放环境变量）
+python -m sgs_data.evalbank configs/data/evalbank.yaml --set bank=runs/data-demo-xxx/test.jsonl   # 用题库考模型
+```
+
 **跑测试和测速**：
 
 ```bash
-python -m pytest                       # 248 个单测
+python -m pytest                       # 265 个单测
 python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
 python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```
@@ -206,6 +215,7 @@ sgs/export.py        批量导出 JSONL
 sgs/rollout.py       rollout 估值
 sgs/replay.py        录像
 sgs/tools/           测速、本地网页对战、本地假模型服务（fake_llm）
+sgs_data/            造训练数据（关键局面模板、往下模拟打标签、裁判、配比导出、题库评测），只用引擎公开接口
 web/index.html       观察页面
 tests/               规则单测
 docs/                设计文档、规则说明
