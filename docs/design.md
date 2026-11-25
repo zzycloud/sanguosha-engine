@@ -93,6 +93,9 @@ class DuelFrame(Frame):
 - `can_activate` / `activate`：出牌阶段主动技（制衡、苦肉、反间、青囊、仁德、结姻、离间）
 - `distance_mod`、`range_mod`、`slash_limit_mod`、`max_hand_mod`、`prohibit`、`ignore_distance`（马术、诸葛连弩、咆哮、空城、谦逊、奇才）
 
+卡牌对单个目标结算前，引擎会先问 `CardSpec.no_effect(g, use, target)`：返回原因（例如“体力已满”）时跳过这个目标，
+不询问无懈可击、不调用 `effect`。新卡牌只要实现这个方法，就自动遵守“不会生效就不询问”。
+
 **装备效果也是技能**：装备牌的 `CardSpec.skill` 指向一个技能名，装上即拥有，失去即失去。所以装备和武将技能走同一套机制。
 
 ## 扩展：开闭原则怎么落地

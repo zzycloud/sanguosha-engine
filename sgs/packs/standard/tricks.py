@@ -64,6 +64,9 @@ class Dismantle(Trick):
     def play_targets(self, g, user, vc):
         return [(t,) for t in g.others(user) if self._ok(g, user, t, vc) and g.players[t].card_count("hej")]
 
+    def no_effect(self, g, use, target):
+        return None if g.players[target].card_count("hej") else "区域里没有牌"
+
     def effect(self, g, use, target):
         return TakeCardFrame(use.user, target, discard=True)
 
@@ -81,6 +84,9 @@ class Snatch(Trick):
                 continue
             out.append((t,))
         return out
+
+    def no_effect(self, g, use, target):
+        return None if g.players[target].card_count("hej") else "区域里没有牌"
 
     def effect(self, g, use, target):
         return TakeCardFrame(use.user, target, discard=False)
@@ -143,6 +149,11 @@ class Collateral(Trick):
 
     def split_targets(self, targets):
         return [targets[0]], {"victim": targets[1]}
+
+    def no_effect(self, g, use, target):
+        if "weapon" not in g.players[target].equips:
+            return "装备区里没有武器"
+        return None
 
     def effect(self, g, use, target):
         return CollateralFrame(use, target)
@@ -232,6 +243,10 @@ class GodSalvation(Trick):
         # 没有角色受伤时使用没有意义，但规则上允许；为减少无效动作，只在有人受伤时提供
         return [ts] if ts and any(g.players[t].wounded for t in ts) else []
 
+    def no_effect(self, g, use, target):
+        # 对体力已满的角色没有效果，不询问无懈可击（结算到它时再判断，期间可能有人受伤）
+        return None if g.players[target].wounded else "体力已满"
+
     def effect(self, g, use, target):
         g.recover(target, 1, use.user)
 
@@ -251,6 +266,9 @@ class AmazingGrace(Trick):
         use.extra.extend(cards)
         g.log("五谷丰登亮出：" + "、".join(g.cstr(c) for c in cards), "reveal")
         return None
+
+    def no_effect(self, g, use, target):
+        return None if any(c in g.processing for c in use.extra) else "亮出的牌已经被拿完"
 
     def effect(self, g, use, target):
         return GraceFrame(use, target)

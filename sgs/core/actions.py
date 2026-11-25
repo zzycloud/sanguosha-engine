@@ -501,6 +501,12 @@ class UseCardFrame(Frame):
                 if use.info[t].cancelled or not g.players[t].alive:
                     self.i += 1
                     continue
+                why = spec.no_effect(g, use, t)
+                if why:   # 对这名角色不会产生效果：不问无懈可击，直接跳过
+                    g.log(f"【{vc.name}】对 {g.pname(t)} 没有效果（{why}）", "info",
+                          trick=vc.name, target=t, no_effect=why)
+                    self.i += 1
+                    continue
                 if spec.type == "trick" and not getattr(use, "no_nullify", False):
                     self.stage = 4
                     g.push(NullifyFrame(vc.name, self.user, t))
@@ -518,6 +524,10 @@ class UseCardFrame(Frame):
             t = self.targets[self.i]
             self.i += 1
             self.stage = 3
+            why = spec.no_effect(g, use, t)   # 无懈可击询问期间局面可能变了（例如目标用掉了最后一张牌）
+            if why:
+                g.log(f"【{vc.name}】对 {g.pname(t)} 没有效果（{why}）", "info", trick=vc.name, target=t, no_effect=why)
+                return
             f = spec.effect(g, use, t)
             if f is not None:
                 g.push(f)

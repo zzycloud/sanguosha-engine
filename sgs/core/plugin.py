@@ -38,6 +38,11 @@ class CardSpec:
         """所有目标结算前（五谷丰登亮牌）。"""
         return None
 
+    def no_effect(self, g, use, target: int) -> Optional[str]:
+        """轮到对 target 结算时，如果这张牌对它不会产生任何效果，返回原因（例如“体力已满”）。
+        引擎据此跳过这个目标：不询问无懈可击、不结算，只记一条日志。无懈可击询问链结束后还会再检查一次。"""
+        return None
+
     def after_effects(self, g, use) -> None:
         """所有目标结算后（五谷丰登剩余牌进弃牌堆由引擎统一处理）。"""
 
