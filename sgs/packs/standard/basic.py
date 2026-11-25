@@ -11,9 +11,12 @@ class Slash(CardSpec):
     type = "basic"
 
     def play_targets(self, g, user, vc):
+        """出牌阶段使用杀：本回合次数未用完（用装备着的诸葛连弩当杀时按卸下后算），
+        目标是攻击范围内的其他角色（见 can_slash）。"""
         p = g.players[user]
-        if p.turn.get("slash", 0) >= g.slash_limit(user):
-            return []
+        with g.unequipped(user, vc.subcards):
+            if p.turn.get("slash", 0) >= g.slash_limit(user):
+                return []
         return [(t,) for t in g.others(user) if can_slash(g, user, t, vc)]
 
     def effect(self, g, use, target):

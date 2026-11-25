@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pickle
+from contextlib import contextmanager
 import random
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -283,6 +284,22 @@ class Game:
             if s == seat:
                 r += sk.range_mod(self, s)
         return r
+
+    @contextmanager
+    def unequipped(self, seat: int, cids: Iterable[int]):
+        """临时当作 seat 的这些装备已经离开装备区（不触发任何技能），用于判断“用装备区的牌当杀使用”
+        时的距离、攻击范围和出杀次数：例如关羽用装备着的红色武器当杀，攻击范围按卸下武器后算。"""
+        p = self.players[seat]
+        cids = set(cids)
+        orig = p.equips
+        if not cids or not any(c in cids for c in orig.values()):
+            yield
+            return
+        p.equips = {s: c for s, c in orig.items() if c not in cids}
+        try:
+            yield
+        finally:
+            p.equips = orig
 
     def in_attack_range(self, a: int, b: int) -> bool:
         return a != b and self.distance(a, b) <= self.attack_range(a)

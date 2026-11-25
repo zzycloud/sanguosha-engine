@@ -89,12 +89,16 @@ def play_options(g, seat: int) -> List[Option]:
 
 
 def can_slash(g, user: int, target: int, vc: VCard, check_range: bool = True) -> bool:
+    """target 能否成为 user 这张杀的目标：不能是自己、要存活、没有被禁止（空城）、在攻击范围内。
+    用装备区的牌当杀时，按这些牌离开装备区之后的攻击范围和距离计算。"""
     if target == user or not g.players[target].alive:
         return False
     if g.prohibited(user, target, vc):
         return False
-    if check_range and not g.in_attack_range(user, target):
-        return False
+    if check_range:
+        with g.unequipped(user, vc.subcards):
+            if not g.in_attack_range(user, target):
+                return False
     return True
 
 

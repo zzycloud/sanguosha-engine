@@ -76,11 +76,14 @@ class Snatch(Trick):
     name = "顺手牵羊"
 
     def play_targets(self, g, user, vc):
+        """距离为 1 的其他角色（看坐骑，不看武器的攻击范围；奇才无视距离），而且区域里要有牌；谦逊不能成为目标。"""
         out = []
         for t in g.others(user):
-            if not self._ok(g, user, t, vc) or not g.players[t].card_count("hej"):
+            with g.unequipped(user, vc.subcards):
+                near = g.distance(user, t) <= 1 or g.ignores_distance(user, vc)
+            if not near:
                 continue
-            if g.distance(user, t) > 1 and not g.ignores_distance(user, vc):
+            if not self._ok(g, user, t, vc) or not g.players[t].card_count("hej"):
                 continue
             out.append((t,))
         return out
@@ -149,11 +152,6 @@ class Collateral(Trick):
 
     def split_targets(self, targets):
         return [targets[0]], {"victim": targets[1]}
-
-    def no_effect(self, g, use, target):
-        if "weapon" not in g.players[target].equips:
-            return "装备区里没有武器"
-        return None
 
     def effect(self, g, use, target):
         return CollateralFrame(use, target)
@@ -239,13 +237,9 @@ class GodSalvation(Trick):
     name = "桃园结义"
 
     def play_targets(self, g, user, vc):
-        ts = tuple(t for t in g.alive_seats(user) if not g.prohibited(user, t, vc))
-        # 没有角色受伤时使用没有意义，但规则上允许；为减少无效动作，只在有人受伤时提供
-        return [ts] if ts and any(g.players[t].wounded for t in ts) else []
-
-    def no_effect(self, g, use, target):
-        # 对体力已满的角色没有效果，不询问无懈可击（结算到它时再判断，期间可能有人受伤）
-        return None if g.players[target].wounded else "体力已满"
+        # 目标是所有已受伤的角色：体力已满的角色不是目标，也就不会被询问无懈可击。没有人受伤时不能使用
+        ts = tuple(t for t in g.alive_seats(user) if g.players[t].wounded and not g.prohibited(user, t, vc))
+        return [ts] if ts else []
 
     def effect(self, g, use, target):
         g.recover(target, 1, use.user)
@@ -266,9 +260,6 @@ class AmazingGrace(Trick):
         use.extra.extend(cards)
         g.log("五谷丰登亮出：" + "、".join(g.cstr(c) for c in cards), "reveal")
         return None
-
-    def no_effect(self, g, use, target):
-        return None if any(c in g.processing for c in use.extra) else "亮出的牌已经被拿完"
 
     def effect(self, g, use, target):
         return GraceFrame(use, target)
