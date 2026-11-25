@@ -29,7 +29,8 @@ key:
     guojia_yiji_kongcheng: 500
     zhuge_kongcheng: 600
     zhuge_lightning: 500
-    simayi_fankui: 500
+    # simayi_fankui: 500        # 实战要看情况（有时拿手牌、有时拿连弩），规则 AI 模拟几乎总拿手牌（11 比 1），分不出情况，先不用；
+    #                           # 换更强的模拟者后再打开
     zhenji_discard: 600
   test_per_scenario: 40
   test_rollout: {n_min: 64, n_max: 256}
