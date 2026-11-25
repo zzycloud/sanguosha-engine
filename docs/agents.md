@@ -67,15 +67,40 @@ output:         # 输出什么：目录、录像局数、决策数据、模型�
 
 ## 对战的输出
 
-| 文件 | 内容 |
-| --- | --- |
-| `config.yaml` | 实际使用的完整配置（合并默认值和覆盖，密钥打码） |
-| `summary.json` | A、B 各自胜场、先手胜场；模型方另有调用次数、不合法输出次数和比例、兜底次数、平均耗时、token 用量 |
-| `games.jsonl` | 每局一行：种子、武将、A/B 坐哪、结果、用时、出错信息、录像文件名 |
-| `decisions.jsonl` | 每个决策点一行，格式同 `sgs.export`（`sgs-decision/1`），多一个 `agent_info`：来源（模型 / 兜底）、重试次数、模型给的理由 |
-| `llm_calls.jsonl` | 模型每次决策的完整对话（见下） |
-| `replays/*.html` | 录像，浏览器直接打开 |
-| `cards.json` | 牌 id 对照表 |
+跑完打开输出目录里的 **`index.html`**：每局一行（武将、胜负、模型决策和请求次数、答错、兜底、请求失败），
+可以只看出问题的局、点表头排序；每行有“录像”和“轨迹”链接。跑的过程中每打完一局就会更新一次。
+
+```
+runs/xxx/
+  index.html            总索引
+  summary.json          A、B 各自胜场、先手胜场；模型方另有决策次数、请求次数、答错和兜底的次数与比例、
+                        按类型统计的请求失败（error_kinds，例如 {"HTTP 503": 44}）、平均耗时、token 用量
+  games.json            每局一条汇总（和索引页同样的信息）
+  config.yaml           实际使用的完整配置（合并默认值和覆盖，密钥打码）
+  cards.json            牌 id 对照表
+  games/0001/           每局一个目录，里面的东西用同一套编号对齐：
+    replay.html         录像。每个决策点下面列出模型的每次请求，点开看完整提示词、思考、原始回复、
+                        解析结果，请求失败时还有 HTTP 诊断；底部有“上个/下个模型决策”“上个/下个出问题的”按钮
+    game.md             整局按时间顺序的文字轨迹：两次决策之间发生了什么（上帝视角），每个决策点的问题、
+                        全部选项、选了哪个、来源（模型 / 兜底）、答错原因、模型理由，以及提示词和回复原文
+    trajectory.json     每个决策点一项：决策者视角的观察 obs、看到的日志 history、合法动作、选择、
+                        agent_info、最终胜负 outcome（格式同 sgs.export 的一行，见 docs/data.md）
+    llm_calls.json      这局每次交给模型的决策一项（格式见下）
+    result.json         这局汇总，出错时含完整 traceback
+  decisions.jsonl       可选（output.decisions: true）：所有局的决策点合并成一个 JSONL，训练用
+  llm_calls.jsonl       可选（output.llm_calls: true）：所有局的模型调用合并成一个 JSONL，训练用
+```
+
+对齐用的编号：
+
+| 编号 | 在哪 | 意思 |
+| --- | --- | --- |
+| `replay_step` | trajectory.json、llm_calls.json、game.md 的小标题 | 录像第几步。录像右下角显示“第 N 步”，地址后面加 `#step=N` 直接跳过去 |
+| `step` / `decision_step` | trajectory.json / llm_calls.json | 引擎里这局第几个决策（含只有一个选项、自动选掉的） |
+| `llm_calls` / `call` | trajectory.json 每项 / llm_calls.json 每项 | 这个决策对应 llm_calls.json 里的哪几项（下标） |
+
+录像页面每局约 0.3～1 MB；跑几百上千局造数据时，把 `output.replays` 改成一个小数字或 `none`，
+或者把 `output.per_game` 关掉、只开合并 JSONL。
 
 换边（`swap: true`）是复式赛制：每两局用同一个种子，牌堆和两个座位的武将完全一样，只是 A、B 交换座位。
 1v1 先手优势明显，比较两个模型时建议开着。
@@ -117,7 +142,9 @@ ollama run qwen2.5:7b                                                           
 | `api_key` / `api_key_env` | 无 / `OPENAI_API_KEY` | 直接给密钥，或从哪个环境变量读；本地服务通常不需要 |
 | `headers` / `extra_body` | | 额外请求头 / 合并进请求体的字段（如 `top_k`、关闭思考的开关） |
 | `timeout` | 60 | 单次请求最多等几秒 |
-| `http_retries` / `backoff` | 2 / 1.0 | 429、5xx、超时、连不上时重试几次，指数退避的基数（秒） |
+| `http_retries` / `backoff` | 3 / 1.0 | 429、5xx、超时、连不上时重试几次，指数退避的基数（秒） |
+| `max_retry_after` | 60 | 服务端回了 `Retry-After` 就按它等，但最多等这么久（秒） |
+| `proxy` | `auto` | `auto`：本机和内网地址不走代理，其它按系统代理设置；`none`：不走代理；`system`：完全按系统设置；或写代理地址 |
 | `temperature` / `top_p` / `max_tokens` / `stop` / `sample_seed` | 0.7 / - / - / - / - | 采样参数，没填的不发 |
 | `prompt` | `default` | 提示词模板名或 `模块:类名` |
 | `history_lines` | 40 | 提示词里带最近多少条可见日志（0 不带） |
@@ -141,16 +168,18 @@ ollama run qwen2.5:7b                                                           
 4. **不合法就重问**：把模型的回答和“你的回答不合法：编号 7 超出范围，请从 0 到 4 中选……”追加进对话再问，
    最多 `max_retries` 次。
 5. **兜底**：请求失败、超时或一直不合法，交给兜底智能体（默认规则 AI），对局不会卡住；`summary.json` 里能看到兜底比例。
-6. **记录**：整个过程写一条 `llm_calls.jsonl`。
+6. **记录**：整个过程记一条模型调用，写进这局的 `llm_calls.json`（开了 `output.llm_calls` 时也写进合并的 JSONL）。
 
-`llm_calls.jsonl` 每行（`sgs-llm-call/1`）：
+每条模型调用（`sgs-llm-call/1`）：
 
 | 字段 | 说明 |
 | --- | --- |
 | `game_id` / `seat` / `step` / `turn` / `phase` | 哪局、哪个座位、第几个决策 |
+| `call` / `replay_step` / `decision_step` | 这局第几次模型调用、录像第几步、引擎第几个决策（对齐用） |
+| `concurrency` | 跑这局时同时进行的对局数 |
 | `agent` / `model` | |
 | `kind` / `prompt` / `legal_actions` | 决策类型、提示、全部合法动作文字 |
-| `attempts` | 每次请求一项：`messages`（完整对话）、`request`（采样参数，不含密钥）、`response`（服务端原始返回）、`text`、`reasoning`（服务端单独给的思考内容）、`latency`、`usage`、`parsed`、`error` |
+| `attempts` | 每次请求一项：`messages`（完整对话）、`request`（采样参数，不含密钥）、`response`（服务端原始返回）、`text`、`reasoning`（服务端单独给的思考内容）、`latency`、`usage`、`parsed`、`error`、`error_kind`（`illegal` 表示输出不合法，`HTTP 503`、`timeout`、`connect` 等表示请求失败），请求失败或中间重试过时还有 `http`（见下面“请求失败排查”） |
 | `action` / `action_label` | 最终动作 |
 | `source` | `llm`：模型给的；`fallback`：兜底给的 |
 | `reason` | 模型给的理由（`ask_reason=true` 时） |
@@ -169,6 +198,7 @@ ollama run qwen2.5:7b                                                           
 | `fake-flaky` | 第一次乱答，被要求重答后给合法编号 |
 | `fake-bad` / `fake-range` | 永远乱答 / 永远越界（测兜底） |
 | `fake-500` / `fake-slow` | 永远 500 / 先等 `--slow` 秒（测重试和超时） |
+| `fake-503` | 永远返回空内容的 503，带 `Retry-After: 1`（看请求失败时诊断信息长什么样） |
 
 ```bash
 python -m sgs.tools.fake_llm --port 8001
@@ -176,6 +206,35 @@ python -m sgs.arena configs/fake-model.yaml
 ```
 
 `tests/test_agents.py` 就是用它测的重试、兜底、超时、并发和输出文件。
+
+## 请求失败排查（例如 HTTP 503）
+
+调用记录里看到 `"error": "请求失败（4 次）：HTTP 503: "`、响应体是空的，先跑一次自检：
+
+```bash
+python -m sgs.arena configs/你的配置.yaml --check
+```
+
+它会打印合并后的配置，然后对每个模型方：列一下服务端的模型名，发一次最小的对话请求，打印实际请求的地址、
+**有没有走代理、走的哪个**、每次尝试的状态码、响应头（`Server`、`Via`、`Retry-After` 等）、响应体，
+以及一句可能的原因。不通时退出码是 1。只想检查配置不发请求，加 `--no-connect`。
+
+怎么判断是谁返回的 503：
+
+| 看到的 | 多半是 | 怎么办 |
+| --- | --- | --- |
+| 走了代理，503，响应体为空，`Server` 是 Clash/mihomo/squid 之类 | 系统代理（`HTTP_PROXY` 等环境变量或系统设置）把请求转走了，代理连不上模型服务 | 本机和内网地址现在默认不走代理（`proxy: auto`）；其它地址设 `proxy: none` 或在 `NO_PROXY` 里加上 |
+| 没走代理，503/502/504，响应体是 HTML，`Server` 是 nginx 之类 | 模型服务前面的网关，后面的服务没起来或超时 | 看模型服务是否在跑、是否过载 |
+| 503/429，响应体是 JSON 报错，或带 `Retry-After` | 模型服务自己说忙、排队满了或限流 | 调小 `match.concurrency`，调大 `http_retries`、`backoff`；带 `Retry-After` 时会自动按它等 |
+| `timeout` | 生成太慢或排队太久 | 调大 `timeout`，或降低并发 |
+| `connect` | 地址或端口不对、服务没起来 | 检查 `base_url` |
+
+这些信息也都在调用记录里：每次失败的请求有 `http` 字段（`url`、`proxy`、`proxy_mode`、每次尝试的 `status`、
+`headers`、`body`、耗时和等待时间、`hint`），代理地址里的账号密码不会写进去。
+`summary.json` 和 `index.html` 按错误类型统计了请求失败次数，终端每局结束也会打印。
+
+我们在本机复现过一种：设置了 `http_proxy` 而 `no_proxy` 里没有 `localhost` 时，请求本机 vLLM 会被发给代理，
+代理返回空内容的 503，错误信息正好是 `请求失败（3 次）：HTTP 503: `。之前的版本会这样，现在默认 `proxy: auto` 不再走代理。
 
 ## 扩展点（开闭原则）
 

@@ -184,6 +184,30 @@ button, select { font: inherit; color: inherit; }
 .evtext { font-family: var(--serif); font-size: 16px; font-weight: 700; margin: 8px 0 2px; }
 .evtext .pv { color: var(--violet); font-weight: 600; }
 .winner { font-family: var(--serif); font-size: 20px; font-weight: 900; color: var(--gold); }
+/* ---------- 模型调用 ---------- */
+.layout.wide { grid-template-columns: minmax(0, 1fr) 500px; }
+@media (max-width: 1000px) { .layout.wide { grid-template-columns: 1fr; } }
+.decision.has-llm { max-height: 64vh; overflow: auto; }
+.agentbox { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line-2); display: grid; gap: 6px; font-size: 13px; }
+.agentbox .tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.tag { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--panel-2); color: var(--ink-2); font-weight: 600; }
+.tag.ok { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+.tag.bad { background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
+.tag.warn { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber); }
+.agentbox .why { color: var(--ink-2); }
+.agentbox .err { color: var(--red); }
+.agentbox details { border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }
+.agentbox details[open] { background: var(--panel); }
+.agentbox summary { cursor: pointer; padding: 5px 8px; font-size: 12px; font-weight: 600; }
+.agentbox summary .bad { color: var(--red); }
+.msg { padding: 0 8px 8px; }
+.msg .role { font-size: 11px; font-weight: 700; color: var(--muted); margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .5px; }
+.msg pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; max-height: 340px; overflow: auto; }
+.msg pre.reply { border-color: color-mix(in srgb, var(--gold) 55%, transparent); }
+.msg pre.http { border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.jump { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.jump .btn { font-size: 12px; padding: 3px 9px; }
 .waiting { color: var(--muted); }
 
 /* ---------- 日志 ---------- */
@@ -414,7 +438,8 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-si
     $("slider").value = posOf(idx);
     drawSpark();
     $("legend").innerHTML = st.players.map((p, i) => `<span><i style="background:${SEATCOL[i]}"></i>${esc(p.general)}</span>`).join("") +
-      `<span class="pos">${posOf(idx) + 1} / ${vis.length}</span>`;
+      `<span class="pos">第 ${idx} 步 · ${posOf(idx) + 1} / ${vis.length}</span>`;
+    if (!live) try { history.replaceState(null, "", "#step=" + idx); } catch (e) {}
   }
 
   function renderDecision(step, st) {
@@ -437,13 +462,83 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-si
     const clickable = live && live.human === d.player && step === rep.steps[rep.steps.length - 1] && !rep.result;
     const head = `<div class="dhead"><span class="who">${esc(who)}</span><span class="kind">${KIND[d.kind] || esc(d.kind)}</span>
       ${step.auto ? '<span class="auto">唯一选项，自动</span>' : ""}<span class="lbl">${d.player} 号位</span></div>`;
+    el.classList.remove("has-llm");
     if (!mine) {
       el.innerHTML = head + `<div class="prompt waiting">等待对方决策……（当前视角看不到对方的选项）</div>`;
       return;
     }
     el.innerHTML = head + `<div class="prompt">${esc(d.prompt)}</div><ol class="opts">${d.options.map((o, i) =>
-      `<li data-i="${i}" class="${i === step.chosen ? "chosen" : ""}${clickable ? " click" : ""}"><span class="i"><span>${i}</span></span><span>${esc(o)}</span></li>`).join("")}</ol>`;
+      `<li data-i="${i}" class="${i === step.chosen ? "chosen" : ""}${clickable ? " click" : ""}"><span class="i"><span>${i}</span></span><span>${esc(o)}</span></li>`).join("")}</ol>` +
+      agentHTML(step) + jumpHTML();
+    el.classList.toggle("has-llm", !!(step.calls && step.calls.length));
+    bindJump(el);
     if (clickable) el.querySelectorAll("li").forEach((li) => li.onclick = () => liveAct(+li.dataset.i));
+  }
+
+  // ---------- 模型调用（对战输出的录像里才有）----------
+  const SRC = { llm: ["模型给出", "ok"], fallback: ["兜底（模型没给出合法动作）", "bad"], single: ["唯一选项", ""] };
+  const hasCalls = () => !!(rep && rep.llm_calls && rep.llm_calls.length);
+  const isBad = (s) => s.info && (s.info.source === "fallback" || (s.info.errors && s.info.errors.length));
+  function msgsHTML(msgs) {
+    return msgs.map((m) => `<div class="role">${esc(m.role)}</div><pre>${esc(m.content)}</pre>`).join("");
+  }
+  function attemptHTML(a, n, first) {
+    const bits = [`第 ${n} 次请求`];
+    if (a.latency !== undefined && a.latency !== null) bits.push(`${a.latency} 秒`);
+    const u = a.usage || {};
+    if (u.prompt_tokens !== undefined) bits.push(`${u.prompt_tokens}+${u.completion_tokens} token`);
+    let tail = "";
+    if (a.error) tail = ` · <span class="bad">${esc(a.error_kind === "illegal" ? "不合法：" : "失败：")}${esc(a.error)}</span>`;
+    else if (a.parsed !== undefined && a.parsed !== null) bits.push(`解析为 ${a.parsed}`);
+    let msgs = a.messages || [];
+    let note = "";
+    if (n > 1 && first && first.messages && JSON.stringify(msgs.slice(0, first.messages.length)) === JSON.stringify(first.messages)) {
+      note = `<div class="role">前 ${first.messages.length} 条消息同第 1 次请求</div>`;
+      msgs = msgs.slice(first.messages.length);
+    }
+    const reply = a.text !== undefined && a.text !== null ? a.text : (typeof a.response === "string" ? a.response : JSON.stringify(a.response ?? "", null, 2));
+    const http = a.http ? `<div class="role">HTTP 诊断</div><pre class="http">${esc(JSON.stringify(a.http, null, 2))}</pre>` : "";
+    return `<details><summary>${esc(bits.join(" · "))}${tail}</summary><div class="msg">${note}${msgsHTML(msgs)}` +
+      (a.reasoning ? `<div class="role">模型的思考</div><pre>${esc(a.reasoning)}</pre>` : "") +
+      `<div class="role">模型的原始回复</div><pre class="reply">${esc(reply || "（空）")}</pre>${http}</div></details>`;
+  }
+  function agentHTML(step) {
+    if (!step.agent && !step.info) return "";
+    const info = step.info || {};
+    const tags = [];
+    if (step.agent) tags.push(`<span class="tag">${esc(step.agent)}</span>`);
+    if (info.source && SRC[info.source]) tags.push(`<span class="tag ${SRC[info.source][1]}">${SRC[info.source][0]}</span>`);
+    if (info.attempts) tags.push(`<span class="tag ${info.attempts > 1 ? "warn" : ""}">请求 ${info.attempts} 次</span>`);
+    if (info.latency !== undefined && info.source !== "single") tags.push(`<span class="tag">${info.latency} 秒</span>`);
+    let out = `<div class="agentbox"><div class="tags">${tags.join("")}</div>`;
+    if (info.reason) out += `<div class="why">理由：${esc(info.reason)}</div>`;
+    for (const e of info.errors || []) out += `<div class="err">${esc(e)}</div>`;
+    for (const ci of step.calls || []) {
+      const c = rep.llm_calls[ci];
+      if (!c) continue;
+      const at = c.attempts || [];
+      out += at.map((a, j) => attemptHTML(a, j + 1, at[0])).join("");
+    }
+    return out + "</div>";
+  }
+  function findCall(from, dir, bad) {
+    for (let p = posOf(from) + dir; p >= 0 && p < vis.length; p += dir) {
+      const s = rep.steps[vis[p]];
+      if (s.calls && s.calls.length && (!bad || isBad(s))) return vis[p];
+    }
+    return null;
+  }
+  function jumpHTML() {
+    if (!hasCalls()) return "";
+    return `<div class="jump"><button class="btn" data-j="-1">‹ 上个模型决策</button><button class="btn" data-j="1">下个模型决策 ›</button>` +
+      `<button class="btn" data-j="-2">‹ 上个出问题的</button><button class="btn" data-j="2">下个出问题的 ›</button></div>`;
+  }
+  function bindJump(el) {
+    el.querySelectorAll("[data-j]").forEach((b) => b.onclick = () => {
+      const j = +b.dataset.j, k = findCall(idx, Math.sign(j), Math.abs(j) === 2);
+      if (k === null) { b.disabled = true; b.textContent = Math.abs(j) === 2 ? "没有了（没有答错或兜底）" : "没有了"; return; }
+      go(k);
+    });
   }
 
   function buildLines() {
@@ -513,7 +608,11 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-si
     $("empty") && $("empty").remove();
     $("logpanel").hidden = false; $("dock").hidden = false;
     const res = rep.result ? `<span class="badge">${esc(rep.result)}</span>` : "";
-    $("match").innerHTML = `<b>${esc(rep.generals.join(" 对 "))}</b><span>种子 ${esc(rep.seed)}</span>${res}`;
+    const who = rep.agents ? rep.generals.map((g, i) => `${g}（${rep.agents[i]}）`) : rep.generals;
+    $("match").innerHTML = `<b>${esc(who.join(" 对 "))}</b><span>${rep.game ? "第 " + esc(rep.game) + " 局 · " : ""}种子 ${esc(rep.seed)}</span>${res}`;
+    $("layout").classList.toggle("wide", hasCalls());
+    const m = /step=(\d+)/.exec(location.hash);
+    if (m && !keepIdx) idx = snap(Math.min(rep.steps.length - 1, +m[1]));
     buildLines(); renderPersp(); render();
   }
   const go = (i) => { if (!rep) return; idx = snap(Math.max(0, Math.min(rep.steps.length - 1, i))); render(); };
@@ -544,6 +643,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-si
     else if (e.key === "End") go(rep.steps.length - 1);
     else if (e.key === " ") { togglePlay(); e.preventDefault(); }
   });
+  window.addEventListener("hashchange", () => { const m = /step=(\d+)/.exec(location.hash); if (rep && m && +m[1] !== idx) go(+m[1]); });
   $("file").onchange = async (e) => { const f = e.target.files[0]; if (f) load(JSON.parse(await f.text())); };
   $("theme").onclick = () => {
     const r = document.documentElement, dark = matchMedia("(prefers-color-scheme: dark)").matches;

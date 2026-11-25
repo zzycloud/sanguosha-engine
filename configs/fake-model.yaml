@@ -3,7 +3,9 @@
 #   python -m sgs.arena configs/fake-model.yaml
 #
 # 假模型按 model 名模拟各种情况：fake（随机选合法动作）、fake-think（先输出思考）、
-# fake-flaky（第一次乱答）、fake-bad（总是乱答）、fake-range（编号越界）、fake-500、fake-slow。
+# fake-flaky（第一次乱答）、fake-bad（总是乱答）、fake-range（编号越界）、fake-500、
+# fake-503（空内容的 503，看请求失败时记下的诊断）、fake-slow。
+# 跑完打开输出目录里的 index.html，点进每局看录像和模型的输入输出。
 
 match:
   games: 4
@@ -20,4 +22,4 @@ players:
 
 output:
   dir: runs/{name}-{time}
-  replays: 2
+  replays: all

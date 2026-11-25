@@ -29,8 +29,12 @@ players:
     model: Qwen/Qwen2.5-7B-Instruct     # 发给服务端的模型名；LoRA 就写 --lora-modules 里起的名字
     # api_key_env: MY_API_KEY           # 需要鉴权时，从这个环境变量读密钥（本地服务一般不用）
     timeout: 60                         # 单次请求最多等几秒
-    http_retries: 2                     # 超时、连不上、429、5xx 时重试几次
-    backoff: 1.0                        # 重试的指数退避基数（秒）
+    http_retries: 3                     # 超时、连不上、429、5xx 时重试几次
+    backoff: 1.0                        # 重试的指数退避基数（秒），等 1、2、4 秒……左右
+    max_retry_after: 60                 # 服务端回了 Retry-After 时按它等，但最多等这么久
+    proxy: auto                         # auto：本机和内网地址不走代理，其它按系统代理设置（HTTP_PROXY 等）
+                                        # none：不走代理；system：完全按系统设置；或者写代理地址 http://127.0.0.1:7890
+                                        # 遇到“HTTP 503”且没有内容，先看 docs/agents.md 的“请求失败排查”
     # headers: {X-Custom: abc}          # 额外请求头
     # extra_body:                       # 原样合并进请求体，传服务端特有参数
     #   top_k: 20
@@ -62,10 +66,13 @@ players:
 
 output:
   dir: runs/{name}-{time}
-  replays: 5                # 录几局录像：数字、all 或 none
-  decisions: true           # decisions.jsonl：每个决策点一行（训练数据）
-  llm_calls: true           # llm_calls.jsonl：模型每次的完整请求和回复
+  # 打开输出目录里的 index.html：每局一行，点进去看录像（每个决策点下面能展开模型的提示词和回复）
+  # 和 game.md（整局按时间顺序的文字轨迹）。每局的文件在 games/0001/ 这样的目录里。
+  per_game: true            # 每局一个目录：replay.html、game.md、trajectory.json、llm_calls.json、result.json
+  replays: all              # 前几局写录像页面：数字、all 或 none（大批量跑数据时改小，录像每局约 1 MB）
+  decisions: false          # 另外把所有局的决策点合并成一个 decisions.jsonl（训练用）
+  llm_calls: false          # 另外把所有局的模型调用合并成一个 llm_calls.jsonl（训练用）
   rollouts: 0               # >0 时给每个决策点附 rollout 估值（很慢）
-  history: new              # decisions 里的 history：new 只放新日志，full 放全部
-  privileged: true          # decisions 里带上帝视角字段（只能用于分析/critic，不能喂给策略）
+  history: new              # 轨迹里的 history：new 只放新日志，full 放全部
+  privileged: true          # 轨迹里带上帝视角字段（只能用于分析/critic，不能喂给策略）
   progress: true            # 每局结束打印一行

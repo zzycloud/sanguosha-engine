@@ -10,6 +10,7 @@
   fake-bad            永远回乱码（测兜底）
   fake-range          永远回超出范围的编号（测兜底）
   fake-500            永远返回 HTTP 500（测网络重试和兜底）
+  fake-503            永远返回空内容的 HTTP 503，带 Retry-After: 1（模拟代理或网关挡住了请求，看诊断信息长什么样）
   fake-slow           先等 --slow 秒再回答（测超时）
 """
 from __future__ import annotations
@@ -71,7 +72,7 @@ class FakeLLMServer:
 
             def do_GET(self):
                 if self.path.rstrip("/").endswith("/models"):
-                    names = ["fake", "fake-think", "fake-flaky", "fake-bad", "fake-range", "fake-500", "fake-slow"]
+                    names = ["fake", "fake-think", "fake-flaky", "fake-bad", "fake-range", "fake-500", "fake-503", "fake-slow"]
                     return self._send(200, {"object": "list", "data": [{"id": x, "object": "model"} for x in names]})
                 self._send(404, {"error": "not found"})
 
@@ -84,6 +85,12 @@ class FakeLLMServer:
                 if srv.api_key and self.headers.get("Authorization") != f"Bearer {srv.api_key}":
                     return self._send(401, {"error": {"message": "bad api key"}})
                 model = body.get("model", "fake")
+                if model == "fake-503":
+                    self.send_response(503)
+                    self.send_header("Content-Length", "0")
+                    self.send_header("Retry-After", "1")
+                    self.end_headers()
+                    return
                 if model == "fake-500":
                     return self._send(500, {"error": {"message": "fake internal error"}})
                 if model == "fake-slow":

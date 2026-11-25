@@ -34,9 +34,10 @@ DEFAULTS: Dict[str, Any] = {
     },
     "output": {
         "dir": "runs/{time}",    # 输出目录；{time} 换成当前时间，{name} 换成配置文件名
-        "replays": 5,            # 录几局录像：数字、all 或 none
-        "decisions": True,       # 写 decisions.jsonl（每个决策点一行）
-        "llm_calls": True,       # 写 llm_calls.jsonl（模型的完整请求和回复）
+        "per_game": True,        # 每局一个目录（games/0001/）：录像、轨迹、模型调用放在一起
+        "replays": "all",        # 前几局写录像页面：数字、all 或 none（大批量跑数据时改小，录像每局约 1 MB）
+        "decisions": False,      # 另外把所有局的决策点合并成 decisions.jsonl（训练用）
+        "llm_calls": False,      # 另外把所有局的模型调用合并成 llm_calls.jsonl（训练用）
         "rollouts": 0,           # 给每个决策点附 rollout 估值（很慢）
         "history": "new",        # decisions 里的 history：new 只放新日志，full 放全部
         "privileged": True,      # decisions 里带上帝视角字段

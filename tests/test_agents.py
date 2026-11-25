@@ -158,24 +158,85 @@ def test_llm_agent_skips_single_option(srv):
 def test_arena_concurrent_with_fake_model(srv, tmp_path):
     out = tmp_path / "run"
     s = run_arena(llm(srv, ask_reason="true"), "rule", games=4, concurrency=4, swap=True, out=str(out),
-                  replays="2", progress=False)
+                  replays="2", progress=False, write_decisions=True, write_llm_calls=True)
     assert s["games"] == 4 and s["errors"] == 0
     assert s["sides"]["A"]["games_first"] == 2 and s["sides"]["A"]["llm"]["fallbacks"] == 0
     assert sum(v["wins"] for v in s["sides"].values()) + s["draws_or_aborted"] == 4
     files = set(os.listdir(out))
-    assert {"summary.json", "games.jsonl", "decisions.jsonl", "llm_calls.jsonl", "cards.json", "replays"} <= files
-    assert len(os.listdir(out / "replays")) == 2
+    assert {"index.html", "summary.json", "games.json", "decisions.jsonl", "llm_calls.jsonl", "cards.json", "games"} <= files
+    assert sorted(os.listdir(out / "games")) == ["0001", "0002", "0003", "0004"]
+    assert [os.path.exists(out / "games" / d / "replay.html") for d in ("0001", "0002", "0003")] == [True, True, False]
     rows = [json.loads(x) for x in open(out / "decisions.jsonl", encoding="utf-8")]
     llm_rows = [r for r in rows if r["agent"].startswith("llm")]
     assert llm_rows and all(r["agent_info"]["source"] == "llm" for r in llm_rows)
     assert all(r["agent_info"]["reason"] for r in llm_rows)
     calls = [json.loads(x) for x in open(out / "llm_calls.jsonl", encoding="utf-8")]
     assert len(calls) == len(llm_rows)
-    games = [json.loads(x) for x in open(out / "games.jsonl", encoding="utf-8")]
+    # 合并的 JSONL 里一局的行是连在一起的，不和别的局交错
+    ids = [c["game_id"] for c in calls]
+    assert all(ids.index(x) + ids.count(x) - 1 == len(ids) - 1 - ids[::-1].index(x) for x in set(ids))
+    games = json.load(open(out / "games.json", encoding="utf-8"))
     # 交换先后手：每两局同一种子同一对武将
     by = sorted(games, key=lambda r: r["game"])
+    assert [r["game"] for r in by] == [1, 2, 3, 4] and by[0]["dir"] == "games/0001"
     assert by[0]["seed"] == by[1]["seed"] and by[0]["generals"] == by[1]["generals"]
     assert by[0]["seats"] == [0, 1] and by[1]["seats"] == [1, 0]
+
+
+def _embedded_replay(path):
+    import re
+    html = open(path, encoding="utf-8").read()
+    m = re.search(r'id="embedded-replay" type="application/json">(.*?)</script>', html, re.S)
+    return json.loads(m.group(1).replace("<\\/", "</"))
+
+
+def test_arena_per_game_dir_is_aligned(srv, tmp_path):
+    """每局目录里的录像、轨迹、模型调用用 replay_step / step / call 对齐。"""
+    out = tmp_path / "run"
+    s = run_arena(llm(srv, "fake-flaky"), "rule", games=1, out=str(out), progress=False)
+    gd = out / "games" / "0001"
+    assert set(os.listdir(gd)) == {"replay.html", "game.md", "trajectory.json", "llm_calls.json", "result.json"}
+    traj = json.load(open(gd / "trajectory.json", encoding="utf-8"))
+    calls = json.load(open(gd / "llm_calls.json", encoding="utf-8"))
+    rep = _embedded_replay(gd / "replay.html")
+    assert rep["llm_calls"] == calls and rep["agents"] == traj["agents"]
+    assert [c["call"] for c in calls] == list(range(len(calls)))
+    seen = []
+    for row in traj["decisions"]:
+        st = rep["steps"][row["replay_step"]]
+        assert st["type"] == "decision" and st["chosen"] == row["action"]
+        assert st["decision"]["options"] == [a["label"] for a in row["legal_actions"]]
+        assert st.get("calls", []) == row["llm_calls"] and st["agent"] == row["agent"]
+        for ci in row["llm_calls"]:
+            c = calls[ci]
+            assert c["replay_step"] == row["replay_step"] and c["decision_step"] == row["step"]
+            assert c["action"] == row["action"] and c["legal_actions"] == st["decision"]["options"]
+            seen.append(ci)
+    assert sorted(seen) == list(range(len(calls))) and calls
+    # fake-flaky 每次先答错一次：轨迹、汇总、索引页里都能看到
+    r = s["results"][0]
+    assert r["illegal"] == len(calls) and r["llm_requests"] == 2 * len(calls) and r["fallbacks"] == 0
+    assert all(c["attempts"][0]["error_kind"] == "illegal" for c in calls)
+    md = (gd / "game.md").read_text(encoding="utf-8")
+    assert f"录像第 {calls[0]['replay_step']} 步" in md and "模型的原始回复" in md and "答错：" in md
+    assert "← **选择**" in md
+    idx = (out / "index.html").read_text(encoding="utf-8")
+    assert "games/0001/replay.html" in idx and "games/0001/game.md" in idx
+    res = json.load(open(gd / "result.json", encoding="utf-8"))
+    assert res["llm_calls"] == len(calls) and res["dir"] == "games/0001"
+
+
+def test_arena_can_skip_per_game_files(tmp_path):
+    out = tmp_path / "run"
+    run_arena("rule", "random", games=2, out=str(out), progress=False, per_game=False, write_decisions=True)
+    files = set(os.listdir(out))
+    assert "games" not in files and {"decisions.jsonl", "index.html", "summary.json"} <= files
+
+
+def test_replay_viewer_has_llm_panel():
+    html = open(os.path.join(ROOT, "web", "index.html"), encoding="utf-8").read()
+    for name in ("function agentHTML", "function attemptHTML", "模型的原始回复", "下个出问题的", "#step="):
+        assert name in html
 
 
 def test_arena_game_timeout_and_cli(srv, tmp_path, capsys):
@@ -226,10 +287,120 @@ def test_config_defaults_overrides_and_errors(tmp_path):
 def test_run_config_with_fake_model(srv, tmp_path):
     cfg = C.load(os.path.join(ROOT, "configs", "fake-model.yaml"),
                  [f"players.A.base_url={srv.url}", f"output.dir={tmp_path}/{{name}}", "output.progress=false",
-                  "output.decisions=false"])
+                  "output.llm_calls=true"])
     s = run_config(cfg)
     out = tmp_path / "fake-model"
     assert s["errors"] == 0 and s["sides"]["A"]["llm"]["fallbacks"] == 0
     files = set(os.listdir(out))
     assert "config.yaml" in files and "llm_calls.jsonl" in files and "decisions.jsonl" not in files
+    assert "index.html" in files and len(os.listdir(out / "games")) == cfg["match"]["games"]
     assert "agent: llm" in (out / "config.yaml").read_text(encoding="utf-8")
+
+
+# ------------------------------------------------------------------ 请求失败：代理、重试、诊断
+import http.server  # noqa: E402
+import threading  # noqa: E402
+
+from sgs.agents.llm.client import ChatError, OpenAIChatClient, is_local_host  # noqa: E402
+
+
+@pytest.fixture
+def bad_proxy():
+    """一个只会回空内容 503 的“代理”，模拟系统代理连不上模型服务。"""
+    class P(http.server.BaseHTTPRequestHandler):
+        hits = 0
+
+        def log_message(self, *a):
+            pass
+
+        def _r(self):
+            P.hits += 1
+            self.send_response(503)
+            self.send_header("Content-Length", "0")
+            self.send_header("Server", "mihomo")
+            self.end_headers()
+        do_POST = do_GET = _r
+    s = http.server.ThreadingHTTPServer(("127.0.0.1", 0), P)
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+    yield s, P
+    s.shutdown()
+
+
+@pytest.fixture
+def env_proxy(monkeypatch, bad_proxy):
+    for k in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("http_proxy", f"http://user:secret@127.0.0.1:{bad_proxy[0].server_address[1]}")
+    return bad_proxy
+
+
+def test_is_local_host():
+    for h in ("localhost", "127.0.0.1", "::1", "10.1.2.3", "192.168.0.8", "172.20.0.1", "gpu.local", "0.0.0.0"):
+        assert is_local_host(h), h
+    for h in ("api.openai.com", "8.8.8.8", "172.32.0.1", ""):
+        assert not is_local_host(h), h
+
+
+def test_local_server_bypasses_system_proxy_by_default(srv, env_proxy):
+    _, P = env_proxy
+    c = OpenAIChatClient(base_url=srv.url, backoff=0.01)
+    assert c.proxy is None and c.chat([{"role": "user", "content": "x"}], model="fake").text
+    assert P.hits == 0
+
+
+def test_proxy_503_is_diagnosed(srv, env_proxy):
+    """复现用户看到的“请求失败：HTTP 503: ”：本地请求被系统代理转走，代理回空内容 503。"""
+    _, P = env_proxy
+    c = OpenAIChatClient(base_url=srv.url, backoff=0.001, proxy="system", http_retries=2)
+    with pytest.raises(ChatError) as ei:
+        c.chat([{"role": "user", "content": "x"}], model="fake")
+    e = ei.value
+    assert str(e).startswith("请求失败（3 次）：HTTP 503") and e.kind == "HTTP 503" and P.hits == 3
+    d = e.diagnostics
+    assert d["proxy"].startswith("http://127.0.0.1:") and "secret" not in json.dumps(d)
+    assert [a["status"] for a in d["attempts"]] == [503, 503, 503]
+    assert d["attempts"][0]["headers"]["Server"] == "mihomo" and d["attempts"][0]["body"] == ""
+    assert "代理" in d["hint"]
+    # 显式写 none 也不走代理
+    assert OpenAIChatClient(base_url=srv.url, proxy="none").chat([{"role": "user", "content": "x"}], model="fake").text
+
+
+def test_retry_after_is_respected(srv, monkeypatch):
+    waits = []
+    monkeypatch.setattr("sgs.agents.llm.client.time.sleep", lambda t: waits.append(t))
+    c = OpenAIChatClient(base_url=srv.url, backoff=0.001, http_retries=2, max_retry_after=0.5)
+    with pytest.raises(ChatError) as ei:
+        c.chat([{"role": "user", "content": "x"}], model="fake-503")     # Retry-After: 1，封顶 0.5
+    assert waits and all(abs(w - 0.5) < 1e-9 for w in waits)
+    assert "没有内容" in ei.value.diagnostics["hint"] or "代理" in ei.value.diagnostics["hint"]
+
+
+def test_request_errors_are_counted_and_recorded(srv, tmp_path):
+    out = tmp_path / "run"
+    s = run_arena(llm(srv, "fake-503", backoff=0.001, max_retry_after=0, http_retries=1), "rule", games=1,
+                  out=str(out), progress=False)
+    L = s["sides"]["A"]["llm"]
+    assert L["error_kinds"] == {"HTTP 503": L["errors"]} and L["fallbacks"] == L["decisions"] > 0
+    calls = json.load(open(out / "games" / "0001" / "llm_calls.json", encoding="utf-8"))
+    a = calls[0]["attempts"][0]
+    assert a["error_kind"] == "HTTP 503" and a["http"]["attempts"][0]["headers"]["Retry-After"] == "1"
+    assert calls[0]["source"] == "fallback" and calls[0]["concurrency"] == 1
+    assert "HTTP 503" in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_check_connection(srv, env_proxy, capsys):
+    from sgs.agents.llm import check_connection, format_check
+    ok = check_connection(make_agent(llm(srv), seed=0))
+    assert ok["ok"] and ok["proxy"] is None and "fake" in ok["models"]
+    assert "不走代理" in format_check(ok)
+    bad = check_connection(make_agent(llm(srv, proxy="system", backoff=0.001, http_retries=0), seed=0))
+    assert not bad["ok"] and bad["error_kind"] == "HTTP 503" and "代理" in bad["hint"]
+    txt = format_check(bad)
+    assert "不通" in txt and "mihomo" in txt and "可能的原因" in txt
+    warn = check_connection(make_agent(llm(srv, "no-such-model"), seed=0))
+    assert "no-such-model" in warn.get("warning", "")
+    with pytest.raises(SystemExit) as ei:
+        arena_main(["--check", "--set", "players.A.agent=llm", "--set", f"players.A.base_url={srv.url}",
+                    "--set", "players.A.model=fake", "--set", "players.A.proxy=system",
+                    "--set", "players.A.http_retries=0"])
+    assert ei.value.code == 1 and "可能的原因" in capsys.readouterr().err

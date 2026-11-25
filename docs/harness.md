@@ -7,8 +7,8 @@
       │  sgs/config.py：读文件、合并默认值和 --set、检查字段、展开 ${环境变量}
       ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ 6 输出      summary.json · games.jsonl · decisions.jsonl · llm_calls.jsonl │  ← output 段
-│             replays/*.html · config.yaml                                   │
+│ 6 输出      index.html · summary.json · games.json · config.yaml           │  ← output 段
+│             games/0001/{replay.html, game.md, trajectory.json, llm_calls.json} │
 ├──────────────────────────────────────────────────────────────────────────┤
 │ 5 对战调度  sgs/arena.py：排种子和座位（换边）、线程池并发、单局超时、         │  ← match 段
 │             单局出错隔离、汇总胜率和模型统计                                  │
@@ -47,10 +47,10 @@ arena.play_one(种子, 座位)
                           i = parse_action(r.text, len(d.options))
                           合法 → 结束；不合法 → 追加“你的回答不合法……”再问
                       仍失败 → fallback.choose(view, d)          默认规则 AI
-                      写一条 llm_calls.jsonl
+                      记一条模型调用（这局的 llm_calls.json）
          DecisionLog.after(row, i, agent.last_info)
          Recorder.act(i)  →  g.act(i)                  引擎结算，直到下一个决策点
-  └─ 写 decisions.jsonl、录像，返回这局的汇总
+  └─ 写 games/0001/：录像（决策点上挂着模型调用）、trajectory.json、llm_calls.json、game.md，返回这局的汇总
 ```
 
 ## 每层的要点
@@ -65,7 +65,8 @@ arena.play_one(种子, 座位)
    `LLMAgent` 负责把它们串起来，加上重问、超时、兜底和记录。换协议、换模板都在配置里写名字。
 5. **对战调度**：线程池并发（大模型推理是 I/O 等待，线程就够），每局独立建智能体，一局出错只记录不影响别的局；
    换边用复式赛制（同一种子交换座位）。
-6. **输出**：录像、训练数据、模型原始对话三份数据用同一个 `game_id` + `step` 关联，可以互相对照。
+6. **输出**：一局一个目录，录像、轨迹、模型原始对话用同一套编号（`replay_step`、`step`、`call`）对齐；
+   录像页面里每个决策点直接展开模型的输入输出。顶层 `index.html` 汇总每局。训练用的合并 JSONL 是可选的额外导出。
 
 ## 配置文件怎么映射到组件
 
@@ -76,7 +77,7 @@ arena.play_one(种子, 座位)
 | `players.X.agent` | 注册表 `make_agent` 选哪个智能体类 |
 | `players.X` 其它字段 | 原样传给该智能体的构造函数（`llm` 的字段分给 `ChatClient`、`PromptBuilder` 和 `LLMAgent` 自己） |
 | `players.X.client / prompt` | `ChatClient` / `PromptBuilder` 注册表里的名字 |
-| `output.*` | 输出目录、录像局数、是否写 decisions / llm_calls、rollout 估值和导出字段 |
+| `output.*` | 输出目录、是否每局一个目录、写几局录像、是否另外写合并 JSONL、rollout 估值和导出字段 |
 
 ## 扩展点
 

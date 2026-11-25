@@ -52,7 +52,9 @@ python -m sgs.tools.fake_llm --port 8001 &
 python -m sgs.arena configs/fake-model.yaml
 ```
 
-输出目录里有胜负统计、录像、每个决策点的数据，以及模型每次的完整请求和回复（可直接做 SFT/偏好数据）。
+跑完打开输出目录里的 `index.html`：每局一行，点进去是这局的录像（每个决策点下面能展开模型的完整提示词和回复）
+和 `game.md` 文字轨迹；每局的数据都在 `games/0001/` 这样的目录里，按步数对齐。连不上模型或报 HTTP 503 时，
+先跑一次 `python -m sgs.arena 你的配置.yaml --check`，排查说明见 docs/agents.md。
 
 **导出训练数据**（每行一个决策点，字段见 [docs/data.md](docs/data.md)）：
 
@@ -65,7 +67,7 @@ python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl     # 附每�
 **跑测试和测速**：
 
 ```bash
-python -m pytest                       # 204 个单测
+python -m pytest                       # 223 个单测
 python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
 python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```
