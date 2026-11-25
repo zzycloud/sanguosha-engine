@@ -111,6 +111,8 @@ def spec_name(spec: Any) -> str:
     if isinstance(spec, Agent):
         return getattr(spec, "label", None) or spec.name
     if isinstance(spec, dict):
+        if spec.get("label"):
+            return spec["label"]
         k = spec.get("kind", "?")
         return f"{k}:{spec['model']}" if spec.get("model") else k
     kind, cfg = parse_spec(str(spec))

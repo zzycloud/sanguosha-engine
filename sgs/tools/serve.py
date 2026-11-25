@@ -125,16 +125,22 @@ def make_handler(state):
     return H
 
 
-def main():
-    ap = argparse.ArgumentParser()
+def main(argv=None):
+    from .. import config as C
+    ap = argparse.ArgumentParser(description="本地网页对战 / 观战。对手可以是任意智能体，写在配置文件的 players 里")
+    ap.add_argument("config", nargs="?", default=None,
+                    help="配置文件（同 sgs.arena）：players.A 坐 0 号位，players.B 坐 1 号位；match.generals 指定武将")
+    ap.add_argument("--set", "-s", action="append", default=[], metavar="路径=值", help="覆盖配置")
     ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--human", type=int, default=0, help="人类控制的座位，-1 表示 AI 对 AI")
-    ap.add_argument("--generals", nargs=2, default=None)
-    ap.add_argument("--ai", nargs=2, default=["rule", "rule"], metavar=("P0", "P1"),
-                    help="两个座位的 AI（人类座位上的那个会被忽略）：rule / random / llm?model=...，见 docs/agents.md")
-    a = ap.parse_args()
+    ap.add_argument("--human", type=int, default=0, help="人类控制的座位（0 或 1），-1 表示看两个 AI 对打")
+    ap.add_argument("--generals", nargs=2, default=None, help="等于 --set match.generals=[A,B]")
+    a = ap.parse_args(argv)
+    sets = list(a.set) + ([f"match.generals=[{a.generals[0]}, {a.generals[1]}]"] if a.generals else [])
+    cfg = C.load(a.config, sets)
     human = None if a.human < 0 else a.human
-    state = {"human": human, "generals": a.generals, "ai": a.ai, "s": Session(human, a.generals, ai=a.ai)}
+    ai = (C.agent_spec(cfg["players"]["A"]), C.agent_spec(cfg["players"]["B"]))
+    gens = C.generals_list(cfg)
+    state = {"human": human, "generals": gens, "ai": ai, "s": Session(human, gens, ai=ai)}
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(state))
     q = f"?live=1&human={human}" if human is not None else "?live=1"
     print(f"打开 http://127.0.0.1:{a.port}/{q}")

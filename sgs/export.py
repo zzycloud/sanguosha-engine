@@ -128,9 +128,9 @@ class DecisionLog:
         return rows
 
 
-def random_generals(seed: int, n: int = 2) -> List[str]:
+def random_generals(seed: int, n: int = 2, pool: Optional[List[str]] = None) -> List[str]:
     load_all()
-    names = sorted(nm for nm, gg in GENERALS.items() if gg.pack == "standard")
+    names = sorted(pool) if pool else sorted(nm for nm, gg in GENERALS.items() if gg.pack == "standard")
     return random.Random(seed).sample(names, n)
 
 

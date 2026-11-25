@@ -1,0 +1,13 @@
+# 在网页里和模型打（你坐 0 号位，players.A 会被忽略）：
+#   python -m sgs.tools.serve configs/play-vs-model.yaml --human 0
+# 看模型和规则 AI 对打：
+#   python -m sgs.tools.serve configs/play-vs-model.yaml --human -1
+
+match:
+  generals: [诸葛亮, 吕布]     # 0 号位、1 号位；random 每局随机
+
+players:
+  A:
+    agent: rule
+  B:
+    include: models/qwen-local.yaml

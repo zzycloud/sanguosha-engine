@@ -182,6 +182,54 @@ def test_arena_game_timeout_and_cli(srv, tmp_path, capsys):
     s = run_arena(llm(srv, "fake-slow", timeout=5, decision_timeout=1), "rule", games=1, game_timeout=0.2,
                   out=None, progress=False)
     assert s["results"][0]["result"].startswith("超过") and s["draws_or_aborted"] == 1
-    arena_main(["--p0", "rule", "--p1", "random", "--games", "2", "-j", "2", "--replays", "none",
-                "-o", str(tmp_path / "cli")])
+    arena_main(["--set", "players.B.agent=random", "--set", "match.games=2", "--set", "match.concurrency=2",
+                "--set", "output.replays=none", "-o", str(tmp_path / "cli")])
     assert "A rule" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ 配置文件
+from sgs import config as C  # noqa: E402
+from sgs.arena import run_config  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+@pytest.mark.parametrize("name", sorted(os.listdir(os.path.join(ROOT, "configs"))))
+def test_example_configs_load_and_build_agents(name):
+    path = os.path.join(ROOT, "configs", name)
+    if os.path.isdir(path):
+        return
+    cfg = C.load(path)
+    for side in "AB":
+        make_agent(C.agent_spec(cfg["players"][side]), seed=0).close()
+
+
+def test_config_defaults_overrides_and_errors(tmp_path):
+    cfg = C.load(None, ["match.games=3", "players.A.agent=random", "match.generals=[关羽, 吕布]"])
+    assert cfg["match"]["games"] == 3 and cfg["match"]["swap"] is True
+    assert cfg["players"]["A"] == {"agent": "random"} and C.generals_list(cfg) == ["关羽", "吕布"]
+    for bad in (["match.gmaes=3"], ["players.C.agent=rule"], ["match.generals=[关羽, 不存在]"], ["oops"]):
+        with pytest.raises(C.ConfigError):
+            C.load(None, bad)
+    (tmp_path / "m.yaml").write_text("agent: llm\nmodel: base\ntemperature: 0.7\n", encoding="utf-8")
+    (tmp_path / "x.yaml").write_text(
+        "players:\n  A:\n    include: m.yaml\n    temperature: 0\n    api_key: ${SGS_TEST_KEY}\n  B: rule\n",
+        encoding="utf-8")
+    os.environ["SGS_TEST_KEY"] = "sk-secret"
+    cfg = C.load(str(tmp_path / "x.yaml"))
+    spec = C.agent_spec(cfg["players"]["A"])
+    assert spec == {"kind": "llm", "model": "base", "temperature": 0, "api_key": "sk-secret"}
+    assert C.agent_spec(cfg["players"]["B"]) == "rule"
+    assert "sk-secret" not in C.dump_yaml(C.redacted(cfg))
+
+
+def test_run_config_with_fake_model(srv, tmp_path):
+    cfg = C.load(os.path.join(ROOT, "configs", "fake-model.yaml"),
+                 [f"players.A.base_url={srv.url}", f"output.dir={tmp_path}/{{name}}", "output.progress=false",
+                  "output.decisions=false"])
+    s = run_config(cfg)
+    out = tmp_path / "fake-model"
+    assert s["errors"] == 0 and s["sides"]["A"]["llm"]["fallbacks"] == 0
+    files = set(os.listdir(out))
+    assert "config.yaml" in files and "llm_calls.jsonl" in files and "decisions.jsonl" not in files
+    assert "agent: llm" in (out / "config.yaml").read_text(encoding="utf-8")

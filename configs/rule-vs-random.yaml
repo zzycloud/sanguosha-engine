@@ -1,0 +1,16 @@
+# 最简单的配置：规则 AI 对随机 AI。
+#   python -m sgs.arena configs/rule-vs-random.yaml
+# 没写的字段都用默认值，完整字段见 configs/local-vllm.yaml。
+
+match:
+  games: 20          # 局数
+  concurrency: 4     # 同时进行的对局数
+
+players:
+  A:
+    agent: rule
+  B:
+    agent: random
+
+output:
+  dir: runs/{name}-{time}   # {name} = 配置文件名，{time} = 开始时间

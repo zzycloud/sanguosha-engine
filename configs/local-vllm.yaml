@@ -1,0 +1,71 @@
+# 你自己部署的模型（vLLM / SGLang / Ollama 等 OpenAI 兼容服务）对规则 AI。
+# 这份把所有字段都列出来了，不需要的删掉即可（删掉的用默认值）。
+#
+#   vllm serve Qwen/Qwen2.5-7B-Instruct --port 8000
+#   python -m sgs.arena configs/local-vllm.yaml
+#   python -m sgs.arena configs/local-vllm.yaml --set match.games=100 --set players.A.temperature=0   # 临时改几项
+
+name: qwen7b-vs-rule        # 不写就用文件名；输出目录里的 {name}
+
+match:
+  mode: duel                # 游戏模式，目前只有 1v1
+  games: 20                 # 局数（开 swap 时最好是偶数）
+  seed: 0                   # 第一局的种子；同样的种子 = 同样的牌堆和武将
+  swap: true                # 每两局同一副牌、同一对武将，A、B 交换座位（抵消先手优势和发牌运气）
+  generals: random          # random，或者 [0 号位武将, 1 号位武将]，例如 [关羽, 吕布]
+  general_pool: null        # random 时从这些武将里抽，例如 [关羽, 吕布, 貂蝉, 诸葛亮]；null = 全部标准武将
+  concurrency: 8            # 同时进行的对局数。接模型时调大，让推理服务的批处理吃满
+  game_timeout: 1800        # 单局最多多少秒，超时中止（null 不限）
+  max_steps: 20000          # 单局最多多少步
+
+players:
+  A:
+    agent: llm                          # 用对话模型来打
+    label: qwen2.5-7b                   # 统计和数据里显示的名字（不写就是 llm:模型名）
+
+    # ---- 连接 ----
+    client: openai                      # openai / vllm / sglang / ollama（只是默认地址不同），或 模块:类名
+    base_url: http://localhost:8000/v1  # 到 /v1 为止
+    model: Qwen/Qwen2.5-7B-Instruct     # 发给服务端的模型名；LoRA 就写 --lora-modules 里起的名字
+    # api_key_env: MY_API_KEY           # 需要鉴权时，从这个环境变量读密钥（本地服务一般不用）
+    timeout: 60                         # 单次请求最多等几秒
+    http_retries: 2                     # 超时、连不上、429、5xx 时重试几次
+    backoff: 1.0                        # 重试的指数退避基数（秒）
+    # headers: {X-Custom: abc}          # 额外请求头
+    # extra_body:                       # 原样合并进请求体，传服务端特有参数
+    #   top_k: 20
+    #   chat_template_kwargs: {enable_thinking: false}   # 例如关掉 Qwen3 的思考
+
+    # ---- 采样 ----
+    temperature: 0.7
+    # top_p: 0.9
+    max_tokens: 512                     # 思考型模型要调大，否则 JSON 还没输出就被截断
+    # stop: ["\n\n"]
+    # sample_seed: 42                   # 发给服务端的采样种子
+
+    # ---- 提示词 ----
+    prompt: default                     # 提示词模板名，或 模块:类名（自己继承 PromptBuilder）
+    history_lines: 40                   # 带最近多少条可见日志
+    ask_reason: false                   # true：要求模型先写理由 {"reason": ..., "action": ...}，理由进数据
+    show_skill_text: true               # 附上场上技能和装备的原文
+    # extra_rules: "优先保留桃和闪。"     # 追加在系统提示后面的策略提示
+    # system_prompt: "..."              # 整个替换系统提示
+
+    # ---- 容错 ----
+    max_retries: 2                      # 输出不合法时，把错误告诉模型再问几次
+    decision_timeout: 120               # 一个决策点总共最多花几秒（含重试），超了就兜底
+    fallback: rule                      # 兜底智能体；写 none 表示不兜底、直接中止这局
+    skip_single: true                   # 只有一个选项时不调模型
+
+  B:
+    agent: rule
+
+output:
+  dir: runs/{name}-{time}
+  replays: 5                # 录几局录像：数字、all 或 none
+  decisions: true           # decisions.jsonl：每个决策点一行（训练数据）
+  llm_calls: true           # llm_calls.jsonl：模型每次的完整请求和回复
+  rollouts: 0               # >0 时给每个决策点附 rollout 估值（很慢）
+  history: new              # decisions 里的 history：new 只放新日志，full 放全部
+  privileged: true          # decisions 里带上帝视角字段（只能用于分析/critic，不能喂给策略）
+  progress: true            # 每局结束打印一行

@@ -23,7 +23,8 @@ sgs/
   agents/          智能体接口、注册表、随机 AI、规则 AI、大模型（agents/llm/，见 docs/agents.md）
   env.py           类 gym 接口
   export.py        批量导出 JSONL 训练数据（docs/data.md）
-  arena.py         对战命令行：指定双方智能体，并发对局，出统计、录像、数据和模型调用记录
+  arena.py         对战：读配置文件，指定双方智能体，并发对局，出统计、录像、数据和模型调用记录
+  config.py        配置文件（YAML/JSON/TOML）的读取、默认值、--set 覆盖和检查（分层设计见 docs/harness.md）
   rollout.py       rollout 估值
   replay.py        录像（JSON / 自带查看器的单文件 HTML）
   tools/           测速、本地网页对战

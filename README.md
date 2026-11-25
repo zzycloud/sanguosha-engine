@@ -21,7 +21,7 @@
 git clone https://github.com/zzycloud/sanguosha-engine.git
 cd sanguosha-engine
 python3 -m venv .venv && source .venv/bin/activate     # Windows：.venv\Scripts\activate
-pip install -e ".[dev]"                                  # 只额外装 pytest
+pip install -e ".[dev]"                                  # 依赖只有 PyYAML，dev 额外装 pytest
 ```
 
 **看一局 AI 对战的录像**（生成一个 HTML，用浏览器直接打开，方向键逐步回放）：
@@ -39,18 +39,20 @@ python -m sgs.tools.serve --generals 诸葛亮 吕布   # 网页里打，按提�
 python -m sgs.tools.serve --human -1               # 网页里看两个规则 AI 实时对打
 ```
 
-**接你自己的模型来打**（vLLM / SGLang / Ollama / 任何 OpenAI 兼容接口，详见 [docs/agents.md](docs/agents.md)）：
+**接你自己的模型来打**：所有设置写在一个配置文件里，`configs/` 下有带注释的示例
+（规则 AI 对打、本地 vLLM、云 API、假模型、网页人机），详见 [docs/agents.md](docs/agents.md)，
+整体设计见 [docs/harness.md](docs/harness.md)。
 
 ```bash
-python -m sgs.arena --p0 "llm?model=Qwen2.5-7B-Instruct&base_url=http://localhost:8000/v1" \
-    --p1 rule --games 20 -j 4 --swap -o runs/qwen-vs-rule
-# 没有模型也能先跑通流程：起一个本地假模型
+python -m sgs.arena configs/local-vllm.yaml                        # 改里面的 base_url 和 model
+python -m sgs.arena configs/local-vllm.yaml --set match.games=100  # 命令行只做临时覆盖
+python -m sgs.tools.serve configs/play-vs-model.yaml --human 0     # 网页里和模型打
+# 没有模型也能先跑通：起一个本地假模型
 python -m sgs.tools.fake_llm --port 8001 &
-python -m sgs.arena --p0 "llm?model=fake&base_url=http://127.0.0.1:8001/v1" --p1 rule --games 4
+python -m sgs.arena configs/fake-model.yaml
 ```
 
 输出目录里有胜负统计、录像、每个决策点的数据，以及模型每次的完整请求和回复（可直接做 SFT/偏好数据）。
-网页对战也能换成模型：`python -m sgs.tools.serve --ai rule "llm?model=...&base_url=..."`。
 
 **导出训练数据**（每行一个决策点，字段见 [docs/data.md](docs/data.md)）：
 
@@ -63,7 +65,7 @@ python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl     # 附每�
 **跑测试和测速**：
 
 ```bash
-python -m pytest                       # 196 个单测
+python -m pytest                       # 204 个单测
 python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
 python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```
@@ -187,7 +189,9 @@ sgs/core/            核心引擎（不认识任何具体武将）
 sgs/packs/standard/  标准版：牌堆、卡牌、装备、技能、武将
 sgs/modes/           游戏模式（duel = 1v1）
 sgs/agents/          智能体接口和注册表、随机 AI、规则 AI、大模型（llm/）
-sgs/arena.py         对战命令行（接模型打、并发、出录像和数据）
+sgs/arena.py         对战（读配置文件，接模型打、并发、出录像和数据）
+sgs/config.py        配置文件的读取、默认值和覆盖
+configs/             带注释的示例配置
 sgs/env.py           类 gym 接口
 sgs/export.py        批量导出 JSONL
 sgs/rollout.py       rollout 估值
