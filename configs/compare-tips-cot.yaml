@@ -6,7 +6,7 @@
 #
 # 四组：none（什么都不加）/ tips（加自己武将的技巧）/ cot（关键决策先分析）/ both（两个都加）。
 # 每组第 k 局的武将和牌堆完全一样，只有提示词不同。
-# 结果：runs/compare-tips-cot-时间/comparison.md（胜率和 95% 区间、解析失败率、兜底率、请求次数、token），
+# 结果：runs/compare-tips-cot-时间/comparison.md（胜率和 95% 区间、解析失败率、兜底率、分析超长和截断次数、请求次数、token），
 # 每组子目录的 index.html 能点进每局看录像；开了思维链的决策，录像里会显示模型的“分析”。
 #
 # 花钱估算：每局 30～80 个模型决策。思维链只在关键决策上写分析，回复 token 会多一些。
@@ -29,9 +29,18 @@ base:
       include: models/strong-api.yaml
       prompt: v2
       temperature: 0.3
-      max_tokens: 1024        # 思维链组回复会变长，留够
+      max_tokens: 4096        # 设宽一点：推理模型（例如 step-5-preview）的思考可能也算在 max_tokens 里，
+                              # 设小了会想到一半被截断。分析的长度不靠它卡，靠事后数 content 里的字数
+      # reasoning_effort: low  # 推理模型的思考强度（low / medium / high），原样发给服务端；不写就不发
+      # cot_reasoning_effort: medium   # 只在关键决策用的思考强度（不写就和 reasoning_effort 一样）
       tips: false
       cot: "off"
+      cot_source: content     # 分析从哪来：content = 回答里先写三行短分析再给编号（默认）；
+                              #   reasoning = 提示词不变、只要编号，把模型的思考字段（reasoning / reasoning_content）
+                              #   原文记下来，导出训练数据时再压缩成三行（python -m sgs_data.cot_export）
+      cot_max_chars: 80       # 三行分析（局面 / 得失 / 结论）加起来最多 80 字；超了记“分析超长”，不影响这一局
+      cot_max_tokens: null    # 需要分析的请求单独的 max_tokens；null = 和上面一样。普通（非推理）模型可以写 auto（= 220）
+      cot_retries: 1          # 分析的回复被截断或没写编号时重答 1 次，再不行交给规则 AI
     B: rule
   output:
     replays: all
@@ -45,6 +54,9 @@ variants:
     players: {A: {label: 关键分析, cot: key}}
   both:
     players: {A: {label: 技巧加关键分析, tips: {dir: configs/tips, self: true, opponent: false}, cot: key}}
+  # 想比较“分析写在回答里”和“用模型自己的思考”，加一组（多花一组的钱）：
+  # both_reason:
+  #   players: {A: {label: 技巧加思考字段, tips: {dir: configs/tips, self: true, opponent: false}, cot: key, cot_source: reasoning}}
   # 想再试“每个决策都分析”或“对手技巧也给”，照着加一组：
   # cot_all:
   #   players: {A: {label: 全部分析, cot: all}}

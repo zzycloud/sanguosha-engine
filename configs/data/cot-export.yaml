@@ -1,0 +1,18 @@
+# 把强模型对局（compare-tips-cot.yaml 之类跑出来的目录）导出成“三行短分析 + 编号”的 SFT 数据。
+#   uv run python -m sgs_data.cot_export configs/data/cot-export.yaml
+runs:
+  - runs/compare-tips-cot-*/both     # 对局输出目录，可以写通配符；会找下面所有 games/*/llm_calls.json
+agents: []                           # 只要这些显示名（label）的决策，例如 [技巧加关键分析]；空列表 = 全要
+only_wins: false                     # true：只要赢了那一方的决策
+analysis_from: auto                  # auto：按对局时的 cot_source；content：回答里写的三行；reasoning：思考字段原文
+max_chars: 80                        # 三行加起来最多多少字（不算空白，含“局面：”标签）
+overlong: drop                       # content 分析超长：drop 丢掉 / compress 让压缩模型改成三行 / keep 照样留
+require_three_lines: true            # content 分析不是标准三行也当作不合格
+compressor:                          # 压缩用的模型（overlong: compress 或分析来自 reasoning 时要用）
+  include: ../models/strong-api.yaml
+  temperature: 0.2
+compress_retries: 1
+concurrency: 4
+include_plain: false                 # true：非关键决策也导出（答案只有编号）
+drop_tips: false                     # true：把对局时注入的武将技巧从提示词里删掉
+cot_mode: key                        # 导出提示词的格式说明，和你推理时的 cot 一样

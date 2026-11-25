@@ -15,3 +15,5 @@ variants:
   tips: {players: {A: {label: 技巧, tips: true}}}
   cot: {players: {A: {label: 关键分析, cot: key}}}
   both: {players: {A: {label: 技巧加关键分析, tips: true, cot: key}}}
+  # 推理模型的样子：思考在 reasoning 字段里，回答只有编号
+  reason: {players: {A: {label: 思考字段, model: fake-reason, tips: true, cot: key, cot_source: reasoning, reasoning_effort: low}}}

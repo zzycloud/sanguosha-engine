@@ -94,7 +94,8 @@ def row(name: str, s: Dict[str, Any], side: str) -> Dict[str, Any]:
         "avg_completion_tokens": round(L.get("completion_tokens", 0) / req, 1) if req else None,
         "avg_latency": L.get("avg_latency"), "seconds": s.get("seconds"),
         "prompt_tokens": L.get("prompt_tokens", 0), "completion_tokens": L.get("completion_tokens", 0),
-        "cot_decisions": L.get("cot_decisions", 0),
+        "cot_decisions": L.get("cot_decisions", 0), "cot_overlong": L.get("cot_overlong", 0),
+        "cot_truncated": L.get("cot_truncated", 0),
     }
 
 
@@ -103,7 +104,7 @@ def pct(x: Optional[float]) -> str:
 
 
 def table(rows: List[Dict[str, Any]]) -> str:
-    head = ["变体", "局数", "胜率（95% 区间）", "先手胜", "解析失败率", "兜底率", "请求失败", "决策 / 先分析 / 请求",
+    head = ["变体", "局数", "胜率（95% 区间）", "先手胜", "解析失败率", "兜底率", "请求失败", "决策 / 先分析 / 请求", "分析超长 / 截断",
             "平均提示 token", "平均回复 token", "总 token", "平均用时"]
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for r in rows:
@@ -112,6 +113,7 @@ def table(rows: List[Dict[str, Any]]) -> str:
             r["variant"], r["games"], f"{pct(r['win_rate'])}（{pct(lo)}～{pct(hi)}）",
             f"{r['wins_first']}/{r['games_first']}", pct(r["illegal_rate"]), pct(r["fallback_rate"]),
             r["request_errors"], f"{r['decisions']} / {r.get('cot_decisions', 0)} / {r['requests']}",
+            f"{r.get('cot_overlong', 0)} / {r.get('cot_truncated', 0)}",
             r["avg_prompt_tokens"] if r["avg_prompt_tokens"] is not None else "-",
             r["avg_completion_tokens"] if r["avg_completion_tokens"] is not None else "-",
             r.get("prompt_tokens", 0) + r.get("completion_tokens", 0),
@@ -143,7 +145,8 @@ def _write(top: str, exp: Dict[str, Any], rows: List[Dict[str, Any]]) -> None:
     with open(os.path.join(top, "comparison.md"), "w", encoding="utf-8") as f:
         f.write(f"# {exp['name']}\n\n比的是 {exp['side']} 方（{rows[0]['agent']}，对手 {rows[0]['opponent']}）。"
                 "解析失败率 = 没解析出合法编号的请求 / 请求次数（失败后会重问，还不行才兜底）；兜底率 = 交给规则 AI 的决策 / 模型决策次数；"
-                "“先分析”是开了思维链、要求先写分析的决策数；平均 token 是每次请求的，总 token 是这一组全部请求加起来。\n\n")
+                "“先分析”是开了思维链、要求先写分析的决策数；分析超长 = 编号拿到了但分析超过字数上限的次数（导出训练数据时会按字数过滤），"
+                "截断 = 回复写到 max_tokens 上限、没写到编号的请求数（会重答一次，再不行兜底）；平均 token 是每次请求的，总 token 是这一组全部请求加起来。\n\n")
         f.write(table(rows) + "\n\n")
         for r in rows:
             f.write(f"- {r['variant']}：[{r['variant']}/index.html]({r['variant']}/index.html)\n")

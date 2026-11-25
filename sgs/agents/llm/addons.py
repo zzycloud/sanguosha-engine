@@ -7,8 +7,13 @@
         tips: true                 # 注入自己武将的技巧（configs/tips/武将名.md）
         # tips: {dir: configs/tips, self: true, opponent: true}   # 对手武将的技巧也注入（默认不注入）
         cot: key                   # off（默认）/ key（只在关键决策先分析）/ all（每个决策都先分析）
-        cot_max_chars: 150         # 分析最多写多少字（写进提示词的要求，不硬截断）
-        max_tokens: 1024           # 开思维链时回复变长，max_tokens 要留够
+        cot_max_chars: 80          # 分析三行加起来最多多少字（去掉空白后的字数，含“局面：”这些标签）
+        cot_source: content        # 分析从哪来：content（默认，要求模型在回答里先写三行短分析）
+                                   #   / reasoning（推理模型用：提示词不变，只要编号；模型自己的思考字段
+                                   #     reasoning / reasoning_content 原样记下，导出数据时再压缩成三行）
+        cot_max_tokens: null       # 需要分析的请求单独的 max_tokens；默认不另设（用 max_tokens）。
+                                   #   推理模型的思考可能也算在 max_tokens 里，别设小；普通模型可以写 auto（= 字数上限 × 2 + 60）
+        cot_retries: 1             # 分析的回复解析不出编号（多半是太长被截断）时重答几次，再不行交给兜底 AI
 
 实现方式：TipsCoTPrompt 包在任何一个提示词模板（default、v2 或你自己的）外面，只改三处：
   1. system 末尾的输出格式说明前面，插入技巧段落；
@@ -30,6 +35,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from .parse import JSON_OBJ, THINK, parse_action
 from .prompt import FORMAT_PLAIN, FORMAT_REASON, PromptBuilder
 
+COT_SOURCES = ("content", "reasoning")
 COT_MODES = ("off", "key", "all")
 
 # 受到伤害后能发动的技能：被杀时“出闪还是扣血发技能”是真正要想的（卖血）
@@ -147,23 +153,57 @@ class Tips:
 
 
 # ---------------------------------------------------------------------------- 思维链格式和解析
+DEFAULT_MAX_CHARS = 80
+COT_LABELS = ("局面", "得失", "结论")
+COT_EXAMPLE = ("局面：对面 1 血没有手牌，我有杀和过河拆桥\n"
+               "得失：直接杀他没闪可出；先拆没有必要\n"
+               "结论：直接杀")
+
+
+def auto_max_tokens(max_chars: int) -> int:
+    """需要分析的请求的 max_tokens：中文大约 1～1.5 个 token 一个字，再留出 JSON 和换行的余量。"""
+    return int(max_chars) * 2 + 60
+
+
 def cot_format(max_chars: int) -> str:
-    return (f"先写“分析：”，用不超过 {max_chars} 字分析局面要点和几个选项的得失；"
-            '然后另起一行，最后一行只写 JSON：{"action": 编号}')
+    return (f"先分析，再给编号。分析固定写三行，三行加起来不超过 {max_chars} 字，每行一句话：\n"
+            "局面：最关键的局面信息\n得失：几个选项各自的主要得失\n结论：选哪个\n"
+            '然后最后一行只写 JSON：{"action": 编号}\n'
+            f"格式示例（内容和这道题无关）：\n{COT_EXAMPLE}\n" + '{"action": 0}')
 
 
 def cot_system_note(mode: str, max_chars: int) -> str:
     if mode == "all":
-        return "回答格式：" + cot_format(max_chars)
-    return "回答格式：按每道题末尾写的格式回答。关键的决定，题目末尾会要求你先写分析再给编号；其它决定直接给编号。"
+        return f"回答格式：每个决定都先写三行简短分析（局面、得失、结论，共不超过 {max_chars} 字），最后一行写 JSON，具体见每道题末尾。"
+    return "回答格式：按每道题末尾写的格式回答。关键的决定，题目末尾会要求你先写三行简短分析再给编号；其它决定直接给编号。"
+
+
+def analysis_len(s: Optional[str]) -> int:
+    """分析的字数：去掉空白后的字符数（含“局面：”这些标签）。"""
+    return len(re.sub(r"\s", "", s or ""))
+
+
+def three_lines(s: Optional[str]) -> bool:
+    """是不是正好三行、依次以 局面 / 得失 / 结论 开头。"""
+    lines = [x.strip() for x in (s or "").splitlines() if x.strip()]
+    return len(lines) == 3 and all(re.match(rf"^{lb}\s*[:：]", x) for lb, x in zip(COT_LABELS, lines))
+
+
+def visible_text(text: Optional[str]) -> str:
+    """去掉推理模型写在正文里的 <think>…</think>；没写完的思考（被截断）整段去掉。"""
+    t = THINK.sub("", text or "")
+    low = t.lower()
+    if "<think>" in low:
+        t = t[:low.index("<think>")]
+    return t.strip()
 
 
 def parse_cot(text: Optional[str], n: int, labels: Sequence[str] = ()) -> Tuple[Optional[int], Optional[str], Optional[str]]:
     """返回 (编号, 错误原因, 分析文本)。编号只从最后一个带 action 的 JSON 取；没有 JSON 时看最后一行。
-    不在分析正文里找数字，避免把“选 2 不好”里的 2 当成答案。"""
+    不在分析正文里找数字，避免把“选 2 不好”里的 2 当成答案。推理模型的内部思考不算分析。"""
     if text is None:
         return None, "回复为空", None
-    t = THINK.sub("", text).strip()
+    t = visible_text(text)
     objs = [(m.start(), m.end(), m.group(0)) for m in JSON_OBJ.finditer(t)]
     for s, e, raw in reversed(objs):
         try:
@@ -179,13 +219,13 @@ def parse_cot(text: Optional[str], n: int, labels: Sequence[str] = ()) -> Tuple[
     i, err, _ = parse_action(lines[-1], n, labels)
     if err is None:
         return i, None, _clean_analysis("\n".join(lines[:-1]))
-    return None, "没有在最后一行找到 {\"action\": 编号}" + ("（分析可能写太长被截断了）" if len(t) > 50 else ""), \
-        _clean_analysis(t)
+    return None, "没有在最后一行找到 {\"action\": 编号}", _clean_analysis(t)
 
 
 def _clean_analysis(s: str) -> Optional[str]:
     s = re.sub(r"^```(?:json)?\s*|\s*```$", "", s.strip(), flags=re.I).strip()
     s = re.sub(r"^分析\s*[:：]\s*", "", s)
+    s = "\n".join(x.strip() for x in s.splitlines() if x.strip())
     return s or None
 
 
@@ -194,13 +234,20 @@ class TipsCoTPrompt:
     """包在一个 PromptBuilder 外面。LLMAgent 用到的 messages() / retry() / parse() 都有。"""
 
     def __init__(self, inner: PromptBuilder, tips: Optional[Tips] = None, cot: str = "off",
-                 cot_max_chars: int = 150, cot_key: Union[None, str, Callable] = None):
+                 cot_max_chars: int = DEFAULT_MAX_CHARS, cot_key: Union[None, str, Callable] = None,
+                 cot_max_tokens: Any = None, cot_retries: int = 1, cot_source: str = "content"):
         if cot not in COT_MODES:
             raise ValueError(f"cot 只能是 {' / '.join(COT_MODES)}，现在是 {cot!r}")
         self.inner = inner
         self.tips = tips
         self.cot = cot
         self.cot_max_chars = int(cot_max_chars)
+        self.cot_max_tokens = auto_max_tokens(self.cot_max_chars) if cot_max_tokens == "auto" else (
+            None if cot_max_tokens in (None, "none", "null", 0) else int(cot_max_tokens))
+        self.cot_retries = int(cot_retries)
+        if cot_source not in COT_SOURCES:
+            raise ValueError(f"cot_source 只能是 {' / '.join(COT_SOURCES)}，现在是 {cot_source!r}")
+        self.cot_source = cot_source
         self.key_fn = _load_fn(cot_key)
         self._local = threading.local()
 
@@ -218,6 +265,16 @@ class TipsCoTPrompt:
     def last_cot(self) -> bool:
         return getattr(self._local, "cot", False)
 
+    @property
+    def last_cot_prompt(self) -> bool:
+        """这次的提示词是不是要求“先写三行分析”（cot_source: reasoning 时提示词不变，只是把思考字段记下来）。"""
+        return self.last_cot and self.cot_source == "content"
+
+    @property
+    def last_tips(self) -> Optional[str]:
+        """上一次注入的技巧段落原文（导出训练数据时想去掉技巧，就把它从 system 里删掉）。"""
+        return getattr(self._local, "tips", None)
+
     def messages(self, view, d) -> List[Dict[str, str]]:
         msgs = [dict(m) for m in self.inner.messages(view, d)]
         use = self.wants_cot(view, d)
@@ -226,35 +283,64 @@ class TipsCoTPrompt:
         if sys_m is not None:
             body, fmt = _split_format(sys_m["content"], "\n")
             extra = []
+            self._local.tips = None
             if self.tips is not None:
                 sec = self.tips.section(view)
                 if sec:
                     extra.append(sec)
-            if self.cot != "off":
+                    self._local.tips = sec
+            if self.cot != "off" and self.cot_source == "content":
                 fmt = cot_system_note(self.cot, self.cot_max_chars)
             sys_m["content"] = "\n".join([body] + (["", *extra, ""] if extra else []) + ([fmt] if fmt else []))
-        if use:
-            u = next((m for m in reversed(msgs) if m["role"] == "user"), None)
-            if u is not None:
-                body, _ = _split_format(u["content"], "\n\n")
-                u["content"] = body + "\n\n这是一个关键决定。" + cot_format(self.cot_max_chars)
+        if use and self.cot_source == "content":
+            _cot_user(msgs, self.cot, self.cot_max_chars)
         return msgs
 
     def retry(self, error: str, n: int) -> Dict[str, str]:
-        if not self.last_cot:
+        if not self.last_cot_prompt:
             return self.inner.retry(error, n)
-        return {"role": "user", "content": f"你的回答没法解析：{error}。分析可以简短一点，"
-                                           f"最后一行一定要单独写 {{\"action\": 编号}}，编号从 0 到 {n - 1}。"}
+        return {"role": "user", "content": f"你的回答没法解析：{error}。分析写短一点，三行加起来不超过 "
+                                           f"{self.cot_max_chars} 字，最后一行一定要单独写 {{\"action\": 编号}}，"
+                                           f"编号从 0 到 {n - 1}。"}
 
     def parse(self, text: Optional[str], n: int, labels: Sequence[str] = ()):
-        if self.last_cot:
+        if self.last_cot_prompt:
             return parse_cot(text, n, labels)
         return parse_action(text, n, labels)
 
     def describe(self) -> Dict[str, Any]:
         return {"tips": None if self.tips is None else {"dir": self.tips.dir, "self": self.tips.self_,
                                                          "opponent": self.tips.opponent},
-                "cot": self.cot, "cot_max_chars": self.cot_max_chars}
+                "cot": self.cot, "cot_source": self.cot_source, "cot_max_chars": self.cot_max_chars,
+                "cot_max_tokens": self.cot_max_tokens}
+
+
+def _cot_user(msgs: List[Dict[str, str]], cot: str, max_chars: int) -> None:
+    u = next((m for m in reversed(msgs) if m["role"] == "user"), None)
+    if u is not None:
+        body, _ = _split_format(u["content"], "\n\n")
+        u["content"] = body + "\n\n" + ("这是一个关键决定。" if cot == "key" else "") + cot_format(max_chars)
+
+
+def to_cot_messages(msgs: List[Dict[str, str]], cot: str = "key", max_chars: int = DEFAULT_MAX_CHARS,
+                    drop_tips: Optional[str] = None) -> List[Dict[str, str]]:
+    """把一次“只要编号”的提示词改写成“先写三行分析再给编号”的样子（导出训练数据用：
+    cot_source: reasoning 跑出来的对局，提示词里没有三行格式，训练时要换成和推理时一样的格式）。
+    drop_tips 给技巧段落原文时顺便把它去掉。已经是三行格式的原样返回（只去技巧）。"""
+    out = [dict(m) for m in msgs]
+    sys_m = next((m for m in out if m["role"] == "system"), None)
+    if sys_m is not None:
+        c = sys_m["content"]
+        if drop_tips and drop_tips in c:
+            c = c.replace("\n\n" + drop_tips + "\n\n", "\n").replace(drop_tips, "")
+        body, fmt = _split_format(c, "\n")
+        if fmt is not None:
+            c = body + "\n" + cot_system_note(cot, max_chars)
+        sys_m["content"] = c
+    u = next((m for m in reversed(out) if m["role"] == "user"), None)
+    if u is not None and "先分析，再给编号" not in u["content"]:
+        _cot_user(out, cot, max_chars)
+    return out
 
 
 def _split_format(content: str, sep: str) -> Tuple[str, Optional[str]]:
@@ -267,11 +353,11 @@ def _split_format(content: str, sep: str) -> Tuple[str, Optional[str]]:
     return content, None
 
 
-def wrap_prompt(inner: PromptBuilder, tips: Any = None, cot: str = "off", cot_max_chars: int = 150,
-                cot_key: Any = None):
+def wrap_prompt(inner: PromptBuilder, tips: Any = None, cot: str = "off", cot_max_chars: int = DEFAULT_MAX_CHARS,
+                cot_key: Any = None, cot_max_tokens: Any = None, cot_retries: int = 1, cot_source: str = "content"):
     """tips 和 cot 都没开就原样返回 inner（提示词和行为跟原来完全一样）。"""
     cot = "off" if cot in (None, False, "") else ("all" if cot is True else str(cot))
     t = Tips.from_config(tips)
     if t is None and cot == "off":
         return inner
-    return TipsCoTPrompt(inner, t, cot, cot_max_chars, cot_key)
+    return TipsCoTPrompt(inner, t, cot, cot_max_chars, cot_key, cot_max_tokens, cot_retries, cot_source)

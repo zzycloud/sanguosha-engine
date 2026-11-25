@@ -188,6 +188,11 @@ ollama run qwen2.5:7b                                                           
 | `ask_reason` | false | 要求模型输出 `{"reason": ..., "action": ...}`，理由写进数据 |
 | `system_prompt` / `extra_rules` | | 替换系统提示 / 在系统提示后追加文字（例如策略提示） |
 | `show_skill_text` | true | 附上场上技能和装备的原文 |
+| `reasoning_effort` | | 推理模型的思考强度（例如 low / medium / high），原样发给服务端，没填不发 |
+| `tips` | | 武将技巧：`true` 或 `{dir, self, opponent}`，见 [tips-cot.md](tips-cot.md) |
+| `cot` / `cot_source` | `off` / `content` | 思维链：`off` / `key` / `all`；分析写在回答里（`content`）还是记思考字段（`reasoning`） |
+| `cot_max_chars` / `cot_max_tokens` / `cot_retries` | 80 / - / 1 | 三行分析字数上限、需要分析的请求单独的 max_tokens（`auto` = 字数 × 2 + 60）、截断后重答几次 |
+| `cot_reasoning_effort` / `cot_key` | | 关键决策单独的思考强度、换关键决策的判断（`模块:函数`） |
 | `max_retries` | 2 | 输出不合法时，把错误告诉模型再问几次 |
 | `decision_timeout` | 300 | 一个决策点总共最多花几秒（含重试），超过就兜底 |
 | `fallback` | `rule` | 兜底智能体；`none` 表示不兜底、直接中止这局 |

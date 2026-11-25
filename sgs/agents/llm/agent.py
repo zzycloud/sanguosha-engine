@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from ..base import Agent, auto_reason
 from .client import ChatClient, ChatError, make_client
 from .parse import parse_action
-from .addons import wrap_prompt
+from .addons import analysis_len, three_lines, wrap_prompt
 from .prompt import PromptBuilder, make_prompt
 
 TRANSCRIPT_FORMAT = "sgs-llm-call/1"
@@ -48,11 +48,16 @@ class LLMAgent(Agent):
     连接：client（openai/vllm/sglang/ollama 或 '模块:类名'）、base_url、model、api_key、
           api_key_env（默认 OPENAI_API_KEY）、timeout（单次请求秒数）、http_retries、backoff、max_retry_after、
           proxy（auto/system/none/代理地址；auto 时本机和内网地址不走代理）、headers、extra_body
-    采样：temperature、top_p、max_tokens、stop、sample_seed（发给服务端的采样种子）；seed 只给兜底 AI 用
+    采样：temperature、top_p、max_tokens、stop、sample_seed（发给服务端的采样种子）；seed 只给兜底 AI 用；
+          reasoning_effort（推理模型的思考强度，例如 low/medium/high，原样发给服务端；不写就不发）
     提示词：prompt（模板名：default 或 v2）、history_lines、ask_reason、system_prompt、extra_rules、show_skill_text、
           prompt_args（交给模板的其它参数，例如 v2 的 {recent_turns: 2, keep_flow: false}）
     可选加料（见 addons.py，都不开时提示词和原来一样）：tips（武将技巧：true / 目录 / {dir, self, opponent}）、
-          cot（思维链：off / key / all）、cot_max_chars（分析最多几个字）、cot_key（换“关键决策”的判断：模块:函数）
+          cot（思维链：off / key / all）、cot_max_chars（分析三行共最多几个字，默认 80）、
+          cot_source（分析从哪来：content 回答里写三行 / reasoning 记推理模型的思考字段，默认 content）、
+          cot_max_tokens（需要分析的请求单独的 max_tokens，默认不另设；auto = 字数上限 × 2 + 60）、
+          cot_retries（分析解析失败时重答几次，默认 1）、cot_reasoning_effort（关键决策单独的思考强度，默认同 reasoning_effort）、
+          cot_key（换“关键决策”的判断：模块:函数）
     容错：max_retries（输出不合法时重问几次）、decision_timeout（一次决策总共最多等几秒）、
           fallback（兜底智能体，默认 rule；写 none 表示不兜底、直接报错）
     其它：skip_single（只有一个选项、或剩下的牌都得选时不调模型，默认开）、transcript（JSONL 路径）、label（显示名）
@@ -73,7 +78,9 @@ class LLMAgent(Agent):
                  prompt: Union[str, PromptBuilder] = "default", history_lines: int = 40,
                  ask_reason: bool = False, system_prompt: Optional[str] = None, extra_rules: str = "",
                  show_skill_text: bool = True, prompt_args: Optional[Dict[str, Any]] = None,
-                 tips: Any = None, cot: Any = "off", cot_max_chars: int = 150, cot_key: Any = None,
+                 tips: Any = None, cot: Any = "off", cot_max_chars: int = 80, cot_key: Any = None,
+                 cot_max_tokens: Any = None, cot_retries: int = 1, cot_source: str = "content",
+                 reasoning_effort: Optional[str] = None, cot_reasoning_effort: Optional[str] = None,
                  max_retries: int = 2, decision_timeout: Optional[float] = 300,
                  fallback: Optional[Any] = "rule", skip_single: bool = True,
                  transcript: Union[None, str, Callable[[Dict[str, Any]], None]] = None,
@@ -86,11 +93,14 @@ class LLMAgent(Agent):
             http_retries=http_retries, backoff=backoff, max_retry_after=max_retry_after, proxy=proxy,
             headers=headers, extra_body=extra_body)
         self.params = {"model": model, "temperature": temperature, "top_p": top_p,
-                       "max_tokens": max_tokens, "stop": stop, "seed": sample_seed}
+                       "max_tokens": max_tokens, "stop": stop, "seed": sample_seed,
+                       "reasoning_effort": reasoning_effort}
+        self.cot_reasoning_effort = cot_reasoning_effort
         self.prompt = prompt if isinstance(prompt, PromptBuilder) else make_prompt(
             prompt, history_lines=history_lines, ask_reason=ask_reason, system_prompt=system_prompt,
             extra_rules=extra_rules, show_skill_text=show_skill_text, **(prompt_args or {}))
-        self.prompt = wrap_prompt(self.prompt, tips=tips, cot=cot, cot_max_chars=cot_max_chars, cot_key=cot_key)
+        self.prompt = wrap_prompt(self.prompt, tips=tips, cot=cot, cot_max_chars=cot_max_chars, cot_key=cot_key,
+                                  cot_max_tokens=cot_max_tokens, cot_retries=cot_retries, cot_source=cot_source)
         self._parse = getattr(self.prompt, "parse", None) or parse_action
         self.prompt_name = prompt if isinstance(prompt, str) else type(prompt).__name__
         self.max_retries = max_retries
@@ -106,7 +116,8 @@ class LLMAgent(Agent):
         self.game: Dict[str, Any] = {}
         self.stats = {"decisions": 0, "llm_calls": 0, "illegal": 0, "errors": 0, "fallbacks": 0,
                       "latency": 0.0, "prompt_tokens": 0, "completion_tokens": 0,
-                      "error_kinds": {}, "cot_decisions": 0}
+                      "error_kinds": {}, "cot_decisions": 0,
+                      "cot_overlong": 0, "cot_truncated": 0}
 
     # ------------------------------------------------------------- 生命周期
     def on_game_start(self, info):
@@ -136,14 +147,25 @@ class LLMAgent(Agent):
         t0 = time.perf_counter()
         action = reason = analysis = None
         source = "fallback"
-        for k in range(self.max_retries + 1):
+        params = self.params
+        tries = self.max_retries
+        from_reasoning = cot and getattr(self.prompt, "cot_source", "content") == "reasoning"
+        if cot:
+            params = dict(self.params)
+            if not from_reasoning:
+                tries = min(self.max_retries, self.prompt.cot_retries)
+            if self.prompt.cot_max_tokens:
+                params["max_tokens"] = self.prompt.cot_max_tokens      # 单独的上限（推理模型别设小）
+            if self.cot_reasoning_effort:
+                params["reasoning_effort"] = self.cot_reasoning_effort
+        for k in range(tries + 1):
             if self.decision_timeout and time.perf_counter() - t0 > self.decision_timeout:
                 attempts.append({"error": f"本次决策已用时超过 {self.decision_timeout} 秒", "error_kind": "decision_timeout"})
                 break
             rec: Dict[str, Any] = {"messages": list(messages)}
             self.stats["llm_calls"] += 1
             try:
-                r = self.client.chat(messages, **self.params)
+                r = self.client.chat(messages, **params)
             except ChatError as e:
                 self.stats["errors"] += 1
                 ek = self.stats["error_kinds"]
@@ -158,8 +180,22 @@ class LLMAgent(Agent):
             rec.update(request={k2: v for k2, v in r.request.items() if k2 != "messages"},
                        response=r.response, text=r.text, reasoning=r.reasoning, latency=round(r.latency, 4),
                        usage=r.usage, http_attempts=r.http_attempts, parsed=i, error=err)
+            if from_reasoning:
+                why = (r.reasoning or "").strip() or None          # 推理模型的思考原文，导出时再压缩
             if cot:
                 rec["analysis"] = why
+                rec["analysis_chars"] = analysis_len(why)
+                try:
+                    finish = (r.response or {})["choices"][0].get("finish_reason")
+                except (KeyError, IndexError, TypeError, AttributeError):
+                    finish = None
+                if finish == "length":
+                    rec["truncated"] = True
+                    if err is not None:
+                        self.stats["cot_truncated"] += 1
+                        err = rec["error"] = f"回复太长，写到 max_tokens 上限被截断了，没写到最后的编号（{err}）"
+                if err is None and not from_reasoning and rec["analysis_chars"] > self.prompt.cot_max_chars:
+                    rec["overlong"] = True
             if r.extra.get("http"):
                 rec["http"] = r.extra["http"]       # 中间重试过：每次尝试的状态码、响应头、等待时间
             if err is not None:
@@ -169,6 +205,8 @@ class LLMAgent(Agent):
                 action, source = i, "llm"
                 if cot:
                     analysis = why
+                    if rec.get("overlong"):
+                        self.stats["cot_overlong"] += 1
                 else:
                     reason = why
                 break
@@ -180,8 +218,14 @@ class LLMAgent(Agent):
                 last = attempts[-1].get("error") if attempts else "未知原因"
                 raise RuntimeError(f"{self.label} 没能给出合法动作：{last}")
             action = self.fallback.choose(view, d)
+        cot_info = {}
+        if cot:
+            cot_info = {"cot": True, "cot_source": "reasoning" if from_reasoning else "content",
+                        "analysis": analysis, "analysis_chars": analysis_len(analysis),
+                        "three_lines": three_lines(analysis),
+                        "overlong": (not from_reasoning) and analysis_len(analysis) > self.prompt.cot_max_chars}
         self.last_info = {"source": source, "attempts": len(attempts), "reason": reason,
-                          **({"cot": True, "analysis": analysis} if cot else {}),
+                          **cot_info,
                           "latency": round(time.perf_counter() - t0, 4),
                           "errors": [a["error"] for a in attempts if a.get("error")],
                           "error_kinds": [a["error_kind"] for a in attempts if a.get("error_kind")]}
@@ -190,11 +234,12 @@ class LLMAgent(Agent):
                 "format": TRANSCRIPT_FORMAT, "game_id": self.game.get("game_id"), "seat": d.player,
                 "agent": self.label, "model": self.model, "template": self.prompt_name,
                 **({"addons": self.prompt.describe()} if hasattr(self.prompt, "describe") else {}),
+                **({"tips_text": self.prompt.last_tips} if getattr(self.prompt, "last_tips", None) else {}),
                 "step": getattr(view, "step", None),
                 "turn": view.turn, "phase": view.phase, "kind": d.kind, "prompt": d.prompt,
                 "legal_actions": labels, "attempts": attempts, "action": action,
                 "action_label": labels[action], "source": source, "reason": reason,
-                **({"cot": True, "analysis": analysis} if cot else {}),
+                **cot_info,
                 "concurrency": self.game.get("concurrency"),
             })
         return action

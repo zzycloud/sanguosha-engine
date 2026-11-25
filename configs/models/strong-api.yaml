@@ -5,5 +5,6 @@ base_url: https://你的服务商地址/v1
 model: 模型名
 api_key_env: MY_API_KEY
 temperature: 0.7          # 裁判要投好几票，留一点随机性
-max_tokens: 1024
+max_tokens: 1024          # 推理模型（思考也可能算 token）请设宽，例如 4096
+# reasoning_effort: low    # 推理模型的思考强度（low / medium / high），服务端支持才写
 timeout: 120

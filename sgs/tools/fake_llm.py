@@ -12,8 +12,15 @@
   fake-500            永远返回 HTTP 500（测网络重试和兜底）
   fake-503            永远返回空内容的 HTTP 503，带 Retry-After: 1（模拟代理或网关挡住了请求，看诊断信息长什么样）
   fake-slow           先等 --slow 秒再回答（测超时）
-  fake-cot            题目要求先分析时回“分析：……”加最后一行 JSON，否则只回 JSON（测思维链）
+  fake-cot            题目要求先分析时回三行分析加最后一行 JSON，否则只回 JSON（测思维链）
   fake-cot-bad        要求先分析时第一次只写分析不给编号（测思维链的解析失败、重试和计数）
+  fake-cot-long       要求先分析时第一次写得特别长，会被 max_tokens 截断（测截断计数和重答）
+  fake-cot-wordy      分析总是比 80 字长一点，但没被截断（测超长计数）
+  fake-reason         推理模型：思考放在 message.reasoning（StepFun 的字段名），content 只有 JSON
+  fake-reason-ds      同上，但思考放在 message.reasoning_content（DeepSeek 风格的字段名）
+  压缩分析的请求（题目里有“压缩成三行”）：fake-cot* 回三行短分析；fake-cot-wordy 回一段太长的
+所有模型：请求里带 max_tokens 时，回复超过 max_tokens 个字就截断，finish_reason 写 length（假装一个字一个 token；
+推理模型的思考也算在里面，先扣思考再扣回答）。
 
 --delay N 让所有模型每次都先等 N 秒左右，模拟真模型的速度，用来看终端进度和心跳。
 """
@@ -32,8 +39,23 @@ from typing import Any, Dict, List, Optional
 N_RE = re.compile(r"合法动作（共 (\d+) 个）")
 
 
+def _reasoning(model: str, messages: List[Dict[str, str]]) -> Optional[str]:
+    if not model.startswith("fake-reason"):
+        return None
+    first_user = next((m["content"] for m in messages if m.get("role") == "user"), "")
+    m = N_RE.search(first_user)
+    n = int(m.group(1)) if m else 1
+    return (f"我先看看局面。一共有 {n} 个选项。对面的手牌不少，血量也还健康，"
+            "我这边如果现在出手，对面大概率能闪掉；如果先留着，下回合配合别的牌更好。"
+            "综合下来，还是按最稳的来。")
+
+
 def _answer(model: str, messages: List[Dict[str, str]]) -> str:
     first_user = next((m["content"] for m in messages if m.get("role") == "user"), "")
+    if "压缩成三行" in first_user:
+        if model == "fake-cot-wordy":
+            return "局面：" + "这个局面需要仔细想一想，" * 10 + "\n得失：差不多\n结论：照原来的选"
+        return "局面：对面手牌多、血量健康\n得失：现在出手容易被闪，留着下回合更好\n结论：先稳住"
     m = N_RE.search(first_user)
     n = int(m.group(1)) if m else 1
     k = int(hashlib.sha256(first_user.encode("utf-8")).hexdigest(), 16) % n
@@ -45,11 +67,16 @@ def _answer(model: str, messages: List[Dict[str, str]]) -> str:
         return json.dumps({"action": n + 3})
     if model == "fake-flaky" and not retried:
         return "嗯……这个问题很复杂"
-    if model in ("fake-cot", "fake-cot-bad"):
-        if any("先写“分析：”" in (m.get("content") or "") for m in messages if m.get("role") == "user"):
+    if model.startswith("fake-cot"):
+        if any("先分析，再给编号" in (m.get("content") or "") for m in messages if m.get("role") == "user"):
+            short = f"局面：一共 {n} 个选项\n得失：选 1 和选 {k} 差不多\n结论：选 {k}"
             if model == "fake-cot-bad" and not retried:
-                return f"分析：一共 {n} 个选项，选 {k} 不错，不过我还没想好……"
-            return f"分析：一共 {n} 个选项，选 1 和选 {k} 差不多，选 {k}。\n{json.dumps({'action': k})}"
+                return f"局面：一共 {n} 个选项\n得失：选 {k} 不错\n结论：我还没想好……"
+            if model == "fake-cot-long" and not retried:
+                return "局面：" + "对面手牌很多，" * 40 + f"\n{json.dumps({'action': k})}"
+            if model == "fake-cot-wordy":
+                return f"局面：一共 {n} 个选项，" + "这个局面需要仔细想一想，" * 8 + f"\n得失：差不多\n结论：选 {k}\n{json.dumps({'action': k})}"
+            return f"{short}\n{json.dumps({'action': k})}"
         return json.dumps({"action": k})
     if model == "fake-think":
         return f"<think>一共 {n} 个选项，我选 {k}。</think>\n{ok}"
@@ -86,7 +113,8 @@ class FakeLLMServer:
 
             def do_GET(self):
                 if self.path.rstrip("/").endswith("/models"):
-                    names = ["fake", "fake-cot", "fake-cot-bad", "fake-think", "fake-flaky", "fake-bad", "fake-range", "fake-500", "fake-503", "fake-slow"]
+                    names = ["fake", "fake-cot", "fake-cot-bad", "fake-cot-long", "fake-cot-wordy", "fake-reason",
+                             "fake-reason-ds", "fake-think", "fake-flaky", "fake-bad", "fake-range", "fake-500", "fake-503", "fake-slow"]
                     return self._send(200, {"object": "list", "data": [{"id": x, "object": "model"} for x in names]})
                 self._send(404, {"error": "not found"})
 
@@ -112,14 +140,24 @@ class FakeLLMServer:
                 if model == "fake-slow":
                     time.sleep(srv.slow)
                 text = _answer(model, body.get("messages", []))
+                think = _reasoning(model, body.get("messages", []))
+                finish = "stop"
+                mt = body.get("max_tokens")
+                if isinstance(mt, int) and mt > 0:
+                    if think and len(think) >= mt:
+                        think, text, finish = think[:mt], "", "length"
+                    elif len(text) + len(think or "") > mt:
+                        text, finish = text[:mt - len(think or "")], "length"
+                message: Dict[str, Any] = {"role": "assistant", "content": text}
+                if think:
+                    message["reasoning_content" if model == "fake-reason-ds" else "reasoning"] = think
                 prompt_tokens = sum(len(m.get("content", "")) for m in body.get("messages", []))
                 self._send(200, {
                     "id": f"fake-{len(srv.requests)}", "object": "chat.completion", "created": int(time.time()),
                     "model": model,
-                    "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
-                                 "finish_reason": "stop"}],
-                    "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(text),
-                              "total_tokens": prompt_tokens + len(text)},
+                    "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+                    "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(text) + len(think or ""),
+                              "total_tokens": prompt_tokens + len(text) + len(think or "")},
                 })
 
         self.httpd = ThreadingHTTPServer((host, port), Handler)
