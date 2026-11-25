@@ -88,42 +88,48 @@ def _call_md(call: Dict[str, Any]) -> List[str]:
     return out
 
 
-def game_markdown(info: Dict[str, Any], logs: Sequence[Dict[str, Any]], rows: Sequence[Dict[str, Any]],
-                  calls: Sequence[Dict[str, Any]]) -> str:
-    """把一局写成按时间顺序的 Markdown：两次决策之间发生的事（上帝视角）+ 每个决策点。"""
-    gens = info["generals"]
-    sides = info["agents"]
-    lines = [f"# 第 {info['game']} 局：{gens[0]}（0 号位，{sides[0]}）对 {gens[1]}（1 号位，{sides[1]}）", ""]
-    lines.append(f"- 结果：{info.get('result')}")
-    lines.append(f"- 种子 {info['seed']}，{info.get('turns')} 回合，{len(rows)} 个需要选择的决策，"
-                 f"交给模型 {info.get('llm_calls', 0)} 次（请求 {info.get('llm_requests', 0)} 次），答错 {info.get('illegal', 0)} 次，兜底 {info.get('fallbacks', 0)} 次")
-    if info.get("error"):
-        lines.append(f"- 出错：{info['error']}")
-    lines += ["- 录像：[replay.html](replay.html)；结构化数据：trajectory.json、llm_calls.json", ""]
-    lines.append("下面每个决策点标了“录像第 N 步”，在录像页面地址后面加 `#step=N` 可以直接跳到那一步。")
-    lines.append("")
-    by_call = {c["call"]: c for c in calls if "call" in c}
-    li = 0
-    turn = None
-    for r in rows:
-        upto = r.get("log_index", li)
-        evs = [t for t in (log_text(e, None) for e in logs[li:upto]) if t]
-        li = max(li, upto)
-        if r["turn"] != turn:
-            turn = r["turn"]
-            lines += [f"## 第 {turn} 回合", ""]
+class GameMarkdown:
+    """边打边写的 Markdown 轨迹：开局写标题，每个决策点追加一节（含之前发生的事），结束时追加结果。
+
+    out 是一个可写的文本文件（每次追加后 flush，中途中止也能看到已经打过的部分）。"""
+
+    def __init__(self, out, info: Dict[str, Any]):
+        self.out = out
+        self.li = 0
+        self.turn = None
+        gens, sides = info["generals"], info["agents"]
+        self._w([f"# 第 {info['game']} 局：{gens[0]}（0 号位，{sides[0]}）对 {gens[1]}（1 号位，{sides[1]}）", "",
+                 f"- 种子 {info['seed']}；录像：[replay.html](replay.html)（一局结束后生成）；"
+                 f"结构化数据：trajectory.json、llm_calls.json",
+                 "- 下面每个决策点标了“录像第 N 步”，在录像页面地址后面加 `#step=N` 可以直接跳到那一步。", ""])
+
+    def _w(self, lines: List[str]) -> None:
+        self.out.write("\n".join(lines) + "\n")
+        self.out.flush()
+
+    def _events(self, logs, upto: Optional[int] = None) -> List[str]:
+        upto = len(logs) if upto is None else upto
+        evs = [t for t in (log_text(e, None) for e in logs[self.li:upto]) if t]
+        self.li = max(self.li, upto)
+        return evs
+
+    def decision(self, r: Dict[str, Any], logs: Sequence[Dict[str, Any]], calls: Sequence[Dict[str, Any]]) -> None:
+        lines: List[str] = []
+        evs = self._events(logs, r.get("log_index", self.li))
+        if r["turn"] != self.turn:
+            self.turn = r["turn"]
+            lines += [f"## 第 {self.turn} 回合", ""]
         if evs:
             lines += ["发生了：", ""] + [f"- {t}" for t in evs] + [""]
         ai = r.get("agent_info") or {}
-        head = (f"### 录像第 {r.get('replay_step')} 步 · {r['general']}（{r['player']} 号位）· "
-                f"{PHASE_TEXT.get(r.get('phase'), r.get('phase') or '')} · {KIND_TEXT.get(r['decision']['kind'], r['decision']['kind'])}")
-        lines += [head, "", f"问题：{r['decision']['prompt']}", ""]
+        lines += [(f"### 录像第 {r.get('replay_step')} 步 · {r['general']}（{r['player']} 号位）· "
+                   f"{PHASE_TEXT.get(r.get('phase'), r.get('phase') or '')} · "
+                   f"{KIND_TEXT.get(r['decision']['kind'], r['decision']['kind'])}"), "",
+                  f"问题：{r['decision']['prompt']}", ""]
         for i, a in enumerate(r["legal_actions"]):
-            mark = "  ← **选择**" if i == r["action"] else ""
-            lines.append(f"{i}. {a['label']}{mark}")
+            lines.append(f"{i}. {a['label']}" + ("  ← **选择**" if i == r["action"] else ""))
         lines.append("")
-        src = ai.get("source")
-        who = r.get("agent") or ""
+        src, who = ai.get("source"), r.get("agent") or ""
         if src:
             s = f"来源：{who}，{SOURCE_TEXT.get(src, src)}"
             if ai.get("attempts"):
@@ -132,19 +138,60 @@ def game_markdown(info: Dict[str, Any], logs: Sequence[Dict[str, Any]], rows: Se
                 s += f"，用时 {ai['latency']} 秒"
             lines.append(s)
             if ai.get("errors"):
-                lines.append(f"答错：{'；'.join(ai['errors'])}")
+                lines.append(f"答错或失败：{'；'.join(ai['errors'])}")
             if ai.get("reason"):
                 lines.append(f"模型给的理由：{ai['reason']}")
         else:
             lines.append(f"来源：{who}")
         lines.append("")
-        for c in r.get("llm_calls") or []:
-            if c in by_call:
-                lines += _call_md(by_call[c])
-    rest = [t for t in (log_text(e, None) for e in logs[li:]) if t]
-    if rest:
-        lines += ["## 结束", "", "发生了：", ""] + [f"- {t}" for t in rest] + [""]
-    return "\n".join(lines) + "\n"
+        for c in calls:
+            lines += _call_md(c)
+        self._w(lines)
+
+    def finish(self, info: Dict[str, Any], logs: Sequence[Dict[str, Any]]) -> None:
+        lines: List[str] = []
+        rest = self._events(logs)
+        if rest:
+            lines += ["## 最后", "", "发生了：", ""] + [f"- {t}" for t in rest] + [""]
+        lines += ["## 结果", "", f"- {info.get('result')}",
+                  f"- {info.get('turns')} 回合，{info.get('decisions')} 个需要选择的决策，"
+                  f"交给模型 {info.get('llm_calls', 0)} 次（请求 {info.get('llm_requests', 0)} 次），"
+                  f"答错 {info.get('illegal', 0)} 次，兜底 {info.get('fallbacks', 0)} 次，用时 {info.get('seconds')} 秒"]
+        if info.get("error"):
+            lines.append(f"- 出错：{info['error']}")
+        self._w(lines + [""])
+
+
+def game_markdown(info: Dict[str, Any], logs: Sequence[Dict[str, Any]], rows: Sequence[Dict[str, Any]],
+                  calls: Sequence[Dict[str, Any]]) -> str:
+    """一次性把一局写成 Markdown（和 GameMarkdown 边打边写的结果一样）。"""
+    import io
+    buf = io.StringIO()
+    by_call = {c["call"]: c for c in calls if "call" in c}
+    md = GameMarkdown(buf, info)
+    for r in rows:
+        md.decision(r, logs, [by_call[c] for c in r.get("llm_calls") or [] if c in by_call])
+    md.finish(info, logs)
+    return buf.getvalue()
+
+
+class Throttled:
+    """把整份 JSON 重写到文件，但最多每 interval 秒一次（先写临时文件再改名，文件随时都是完整的 JSON）。"""
+
+    def __init__(self, path: str, interval: float = 2.0):
+        self.path = path
+        self.interval = interval
+        self.last = 0.0
+
+    def write(self, data_fn, force: bool = False) -> None:
+        import time
+        now = time.perf_counter()
+        if not force and now - self.last < self.interval:
+            return
+        self.last = now
+        tmp = self.path + ".tmp"
+        write_json(tmp, data_fn())
+        os.replace(tmp, self.path)
 
 
 # ---------------------------------------------------------------------------- 总索引页

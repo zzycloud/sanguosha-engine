@@ -12,12 +12,15 @@
   fake-500            永远返回 HTTP 500（测网络重试和兜底）
   fake-503            永远返回空内容的 HTTP 503，带 Retry-After: 1（模拟代理或网关挡住了请求，看诊断信息长什么样）
   fake-slow           先等 --slow 秒再回答（测超时）
+
+--delay N 让所有模型每次都先等 N 秒左右，模拟真模型的速度，用来看终端进度和心跳。
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import random
 import re
 import threading
 import time
@@ -48,8 +51,11 @@ def _answer(model: str, messages: List[Dict[str, str]]) -> str:
 class FakeLLMServer:
     """进程内启动：with FakeLLMServer() as srv: srv.url -> http://127.0.0.1:端口/v1"""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 0, slow: float = 2.0, api_key: Optional[str] = None):
+    def __init__(self, host: str = "127.0.0.1", port: int = 0, slow: float = 2.0, api_key: Optional[str] = None,
+                 delay: float = 0.0, jitter: float = 0.5):
         self.slow = slow
+        self.delay = delay          # 所有对话请求都先等 delay 秒（±jitter 比例），模拟真模型的生成时间
+        self.jitter = jitter
         self.api_key = api_key
         self.requests: List[Dict[str, Any]] = []
         self.lock = threading.Lock()
@@ -84,6 +90,8 @@ class FakeLLMServer:
                     srv.requests.append({"body": body, "auth": self.headers.get("Authorization")})
                 if srv.api_key and self.headers.get("Authorization") != f"Bearer {srv.api_key}":
                     return self._send(401, {"error": {"message": "bad api key"}})
+                if srv.delay > 0:
+                    time.sleep(max(0.0, srv.delay * (1 + srv.jitter * (2 * random.random() - 1))))
                 model = body.get("model", "fake")
                 if model == "fake-503":
                     self.send_response(503)
@@ -136,9 +144,12 @@ def main(argv=None):
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--slow", type=float, default=2.0, help="fake-slow 模型等待的秒数")
+    ap.add_argument("--delay", type=float, default=0.0,
+                    help="所有请求都先等这么多秒再回答，模拟真模型的速度（看终端进度、心跳用），例如 --delay 2")
+    ap.add_argument("--jitter", type=float, default=0.5, help="--delay 的随机浮动比例，0.5 表示 ±50%%")
     ap.add_argument("--api-key", default=None, help="设置后要求请求带 Authorization: Bearer <key>")
     a = ap.parse_args(argv)
-    srv = FakeLLMServer(a.host, a.port, a.slow, a.api_key)
+    srv = FakeLLMServer(a.host, a.port, a.slow, a.api_key, delay=a.delay, jitter=a.jitter)
     print(f"假模型服务：{srv.url}（Ctrl+C 退出）")
     try:
         srv.httpd.serve_forever()

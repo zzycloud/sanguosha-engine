@@ -69,7 +69,7 @@ class LLMAgent(Agent):
                  prompt: Union[str, PromptBuilder] = "default", history_lines: int = 40,
                  ask_reason: bool = False, system_prompt: Optional[str] = None, extra_rules: str = "",
                  show_skill_text: bool = True,
-                 max_retries: int = 2, decision_timeout: Optional[float] = None,
+                 max_retries: int = 2, decision_timeout: Optional[float] = 300,
                  fallback: Optional[Any] = "rule", skip_single: bool = True,
                  transcript: Union[None, str, Callable[[Dict[str, Any]], None]] = None,
                  label: Optional[str] = None, **unknown):
@@ -126,7 +126,7 @@ class LLMAgent(Agent):
         source = "fallback"
         for k in range(self.max_retries + 1):
             if self.decision_timeout and time.perf_counter() - t0 > self.decision_timeout:
-                attempts.append({"error": f"本次决策已用时超过 {self.decision_timeout} 秒"})
+                attempts.append({"error": f"本次决策已用时超过 {self.decision_timeout} 秒", "error_kind": "decision_timeout"})
                 break
             rec: Dict[str, Any] = {"messages": list(messages)}
             self.stats["llm_calls"] += 1

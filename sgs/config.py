@@ -25,7 +25,7 @@ DEFAULTS: Dict[str, Any] = {
         "generals": "random",    # random，或者 [0 号位武将, 1 号位武将]（0 号位先手）
         "general_pool": None,    # generals 为 random 时从这里抽；不填就是全部标准武将
         "concurrency": 1,        # 同时进行的对局数
-        "game_timeout": None,    # 单局最多多少秒
+        "game_timeout": 3600,    # 单局最多多少秒，超了就中止这局并在终端打印（null 不限）
         "max_steps": 20000,      # 单局最多多少步
     },
     "players": {
@@ -41,7 +41,9 @@ DEFAULTS: Dict[str, Any] = {
         "rollouts": 0,           # 给每个决策点附 rollout 估值（很慢）
         "history": "new",        # decisions 里的 history：new 只放新日志，full 放全部
         "privileged": True,      # decisions 里带上帝视角字段
-        "progress": True,        # 每局结束打印一行
+        "progress": "normal",    # 终端进度：quiet（只打开头和汇总）/ normal（每局开始结束、心跳、请求失败）/ verbose（再加每个模型决策）
+        "heartbeat": 30,         # 每隔多少秒打印一行心跳：进行中的局、当前回合、模型调用次数和平均用时、正在等多久；0 关掉
+        "connect_check": True,   # 开打前对每个模型方发一次最小请求，不通就不开打
     },
 }
 
@@ -150,6 +152,11 @@ def load(path: Optional[str] = None, sets: Sequence[str] = (), data: Optional[Di
         bad = [n for n in names if n not in GENERALS]
         if bad:
             raise ConfigError(f"没有这些武将：{', '.join(bad)}")
+    from .progress import level_of
+    try:
+        level_of(cfg["output"]["progress"])
+    except ValueError as e:
+        raise ConfigError(str(e)) from None
     return cfg
 
 

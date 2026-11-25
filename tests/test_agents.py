@@ -218,7 +218,7 @@ def test_arena_per_game_dir_is_aligned(srv, tmp_path):
     assert r["illegal"] == len(calls) and r["llm_requests"] == 2 * len(calls) and r["fallbacks"] == 0
     assert all(c["attempts"][0]["error_kind"] == "illegal" for c in calls)
     md = (gd / "game.md").read_text(encoding="utf-8")
-    assert f"录像第 {calls[0]['replay_step']} 步" in md and "模型的原始回复" in md and "答错：" in md
+    assert f"录像第 {calls[0]['replay_step']} 步" in md and "模型的原始回复" in md and "答错或失败：" in md
     assert "← **选择**" in md
     idx = (out / "index.html").read_text(encoding="utf-8")
     assert "games/0001/replay.html" in idx and "games/0001/game.md" in idx
@@ -404,3 +404,100 @@ def test_check_connection(srv, env_proxy, capsys):
                     "--set", "players.A.model=fake", "--set", "players.A.proxy=system",
                     "--set", "players.A.http_retries=0"])
     assert ei.value.code == 1 and "可能的原因" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------ 终端进度、边打边写、中止
+import io  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+
+from sgs.arena import ArenaError, play_one  # noqa: E402
+from sgs.progress import Progress, fmt_secs, level_of  # noqa: E402
+
+
+def test_progress_levels_and_format():
+    assert level_of(None) == 1 and level_of(True) == 1 and level_of(False) == 0 and level_of("Verbose") == 2
+    with pytest.raises(ValueError):
+        level_of("loud")
+    assert fmt_secs(5) == "5 秒" and fmt_secs(125) == "2 分 05 秒" and fmt_secs(3700) == "1 小时 01 分"
+    with pytest.raises(C.ConfigError):
+        C.load(data={"output": {"progress": "loud"}})
+
+
+def test_arena_prints_start_end_and_summary(srv, tmp_path):
+    buf = io.StringIO()
+    s = run_arena(llm(srv), "rule", games=2, concurrency=2, out=str(tmp_path / "r"), stream=buf,
+                  heartbeat=0, connect_check=True)
+    txt = buf.getvalue()
+    assert "对战开始：2 局" in txt and "连通性检查 A：通" in txt
+    assert txt.count("[开始]") == 2 and txt.count("[结束]") == 2 and "总比分 A" in txt
+    assert s["games"] == 2
+    quiet = io.StringIO()
+    run_arena("rule", "random", games=2, out=None, stream=quiet, progress="quiet")
+    q = quiet.getvalue()
+    assert "对战开始" in q and "[开始]" not in q and "[结束]" not in q
+    verbose = io.StringIO()
+    run_arena(llm(srv), "rule", games=1, out=None, stream=verbose, progress="verbose", heartbeat=0)
+    assert "（模型，" in verbose.getvalue()
+
+
+def test_heartbeat_shows_running_games(tmp_path):
+    with FakeLLMServer(delay=0.15, jitter=0) as slow:
+        buf = io.StringIO()
+        t0 = time.perf_counter()
+        run_arena(llm(slow), "rule", games=1, out=None, stream=buf, heartbeat=0.3, game_timeout=1.5)
+        assert time.perf_counter() - t0 >= 1.0
+    beats = [l for l in buf.getvalue().splitlines() if l.startswith("[进度")]
+    assert beats, buf.getvalue()
+    body = buf.getvalue().split(beats[-1], 1)[1]
+    assert "完成 0/1" in beats[-1] and "第 1 局" in body and "个决策" in body
+    assert "[超时] 第 1 局" in buf.getvalue()
+
+
+def test_request_failures_are_printed_immediately(srv):
+    buf = io.StringIO()
+    run_arena(llm(srv, "fake-503", backoff=0.001, max_retry_after=0, http_retries=1), "rule", games=1,
+              out=None, stream=buf, heartbeat=0, game_timeout=5)
+    txt = buf.getvalue()
+    assert "[请求失败] 第 1 局" in txt and "HTTP 503，响应体为空" in txt and "秒后重试（第 2/2 次）" in txt
+    assert "不再重试，交给兜底" in txt and "[兜底] 第 1 局" in txt
+
+
+def test_connect_check_failure_stops_before_playing(srv, tmp_path):
+    buf = io.StringIO()
+    with pytest.raises(ArenaError):
+        run_arena(llm(srv, "fake-503", backoff=0.001, max_retry_after=0, http_retries=0), "rule", games=1,
+                  out=str(tmp_path / "r"), stream=buf, connect_check=True)
+    assert "不通" in buf.getvalue() and not (tmp_path / "r" / "games").exists()
+
+
+def test_files_are_written_while_playing_and_stop_keeps_them(tmp_path):
+    d = tmp_path / "g"
+    stop = threading.Event()
+    box = {}
+    with FakeLLMServer(delay=0.05, jitter=0) as slow:
+        th = threading.Thread(target=lambda: box.update(info=play_one(
+            1, 0, [llm(slow), "rule"], [0, 1], ["张飞", "黄盖"], game_dir=str(d), stop=stop)))
+        th.start()
+        try:
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                md = (d / "game.md").read_text(encoding="utf-8") if (d / "game.md").exists() else ""
+                if md.count("### 录像第") >= 3 and (d / "trajectory.json").exists():
+                    break
+                time.sleep(0.05)
+            # 打到一半：result.json 是占位，game.md 已经有决策点，trajectory.json 是完整 JSON
+            assert json.loads((d / "result.json").read_text(encoding="utf-8"))["result"] == "进行中…"
+            assert md.count("### 录像第") >= 3
+            mid = json.loads((d / "trajectory.json").read_text(encoding="utf-8"))
+            assert mid["result"] == "进行中…" and mid["decisions"]
+            assert not (d / "replay.html").exists()
+        finally:
+            stop.set()
+            th.join(30)
+    info = box["info"]
+    assert info["result"] == "手动中止（Ctrl+C）" and info["winner_seat"] is None
+    traj = json.loads((d / "trajectory.json").read_text(encoding="utf-8"))
+    assert traj["result"] == "手动中止（Ctrl+C）" and len(traj["decisions"]) >= len(mid["decisions"])
+    assert json.loads((d / "result.json").read_text(encoding="utf-8"))["result"] == "手动中止（Ctrl+C）"
+    assert (d / "replay.html").exists() and "## 结果" in (d / "game.md").read_text(encoding="utf-8")

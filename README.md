@@ -67,7 +67,7 @@ python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl     # 附每�
 **跑测试和测速**：
 
 ```bash
-python -m pytest                       # 223 个单测
+python -m pytest                       # 229 个单测
 python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
 python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```

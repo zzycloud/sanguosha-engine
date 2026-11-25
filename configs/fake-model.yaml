@@ -1,5 +1,5 @@
 # 不花钱、不用 GPU，先把接模型的流程跑通。先在另一个终端起假模型服务：
-#   python -m sgs.tools.fake_llm --port 8001
+#   python -m sgs.tools.fake_llm --port 8001            # 加 --delay 2 模拟每次请求要等 2 秒，看终端心跳
 #   python -m sgs.arena configs/fake-model.yaml
 #
 # 假模型按 model 名模拟各种情况：fake（随机选合法动作）、fake-think（先输出思考）、
@@ -23,3 +23,4 @@ players:
 output:
   dir: runs/{name}-{time}
   replays: all
+  heartbeat: 10             # 每 10 秒打印一行进度

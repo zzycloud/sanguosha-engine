@@ -70,6 +70,8 @@ class ChatResult:
 
 
 class ChatClient:
+    observer: Optional[Callable[[Dict[str, Any]], None]] = None   # 每次 HTTP 尝试失败时回调（进度显示用）
+
     def chat(self, messages: List[Dict[str, str]], **params) -> ChatResult:  # pragma: no cover
         raise NotImplementedError
 
@@ -231,6 +233,14 @@ class OpenAIChatClient(ChatClient):
         with self._request("POST", self.path, body) as r:
             return json.loads(r.read().decode("utf-8"))
 
+    def _notify(self, rec: Dict[str, Any], wait: Optional[float]) -> None:
+        if self.observer is not None:
+            try:
+                self.observer(dict(rec, wait=wait, max=self.http_retries + 1, url=self.base_url + self.path,
+                                   proxy=_mask_proxy(self.proxy)))
+            except Exception:  # pragma: no cover  进度显示出错不影响请求
+                pass
+
     @staticmethod
     def _headers(h) -> Dict[str, str]:
         if h is None:
@@ -267,6 +277,7 @@ class OpenAIChatClient(ChatClient):
                 rec.update(status=e.code, headers=hdrs, body=detail, seconds=round(time.perf_counter() - ta, 3))
                 tries.append(rec)
                 if e.code not in RETRY_STATUS and e.code < 500:
+                    self._notify(rec, None)
                     diag["hint"] = explain(kind, diag)
                     raise ChatError(last, body, detail, kind, diag) from None
             except (socket.timeout, TimeoutError) as e:
@@ -288,11 +299,14 @@ class OpenAIChatClient(ChatClient):
                 last, kind = f"返回无法解析：{e}", "bad_response"
                 rec.update(error=last, seconds=round(time.perf_counter() - ta, 3))
                 tries.append(rec)
+            wait = None
             if attempt < self.http_retries:
                 wait = self.backoff * (2 ** attempt) * (0.5 + random.random())
                 if retry_after is not None:
                     wait = max(wait, min(retry_after, self.max_retry_after))
                 rec["wait"] = round(wait, 3)
+            self._notify(rec, wait)
+            if wait is not None:
                 time.sleep(wait)
         else:
             diag["hint"] = explain(kind, diag)
