@@ -143,8 +143,9 @@ class TriggerFrame(Frame):
                     return
                 self.cur = (s, name)
                 self.stage = 2
-                g.ask(yes_no(s, sk.trigger_prompt(g, s, self.event, self.ev),
-                             {"skill": name, "event": self.event}))
+                g.ask(Decision(s, "trigger", sk.trigger_prompt(g, s, self.event, self.ev),
+                               [Option(("yes",), f"是，发动【{name}】"), Option(("no",), "否，不发动")],
+                               {"skill": name, "event": self.event}))
                 return
             g.done()
             return
@@ -304,6 +305,7 @@ class TurnFrame(Frame):
         if st == 1:
             g.phase = "prepare"
             self.stage = 2
+            self._phase_log(g, "phase_prepare", "进入准备阶段", "prepare")
             trigger(g, "phase_prepare", self.ev)
         elif st == 2:
             g.phase = "judge"
@@ -321,6 +323,7 @@ class TurnFrame(Frame):
                 return
             self.draw = Ev(seat=self.seat, count=g.mode.draw_phase_count(g, self.seat, 2))
             self.stage = 4
+            self._phase_log(g, "draw_phase", f"进入摸牌阶段（应摸 {self.draw.count} 张）", "draw")
             trigger(g, "draw_phase", self.draw)
         elif st == 4:
             if self.draw.count > 0:
@@ -353,9 +356,15 @@ class TurnFrame(Frame):
         elif st == 8:
             g.phase = "finish"
             self.stage = 9
+            self._phase_log(g, "phase_finish", "进入结束阶段", "finish")
             trigger(g, "phase_finish", self.ev)
         else:
             self._end(g)
+
+    def _phase_log(self, g, event, text, phase):
+        """有技能可能在这个阶段发动时才记一条阶段开始，回放里能看清技能是在哪个阶段问的。"""
+        if g.logging and g.has_listener(event):
+            g.log(f"{g.pname(self.seat)} {text}", "phase", seat=self.seat, phase=phase)
 
     def _end(self, g):
         p = g.players[self.seat]
@@ -441,13 +450,13 @@ class UseCardFrame(Frame):
             self.use = use = Ev(user=self.user, card=vc, targets=list(self.targets), extra=[],
                                 info={t: Ev(shan=1, no_dodge=False, cancelled=False, extra=0, ignore_armor=False, duel_need={})
                                       for t in self.targets}, **self.ctx)
-            if g.logging:
+            text = None
+            if g.logging:  # 先拼好文本，等牌移动完再写日志，这样日志时刻的状态就是“使用之后”
                 if spec.type == "equip":
                     text = f"{g.pname(self.user)} 装备了 {vc.describe(g)}"
                 else:
                     tg = ("，目标 " + "、".join(g.pname(t) for t in self.targets)) if self.targets else ""
                     text = f"{g.pname(self.user)} 使用了 {vc.describe(g)}{tg}"
-                g.log(text, "use", seat=self.user, card=vc.name, targets=list(self.targets))
             if vc.name == SLASH:
                 if not self.ctx.get("extra_slash"):
                     p.turn["slash"] = p.turn.get("slash", 0) + 1
@@ -468,6 +477,8 @@ class UseCardFrame(Frame):
             else:
                 g.to_processing(vc.subcards)
                 self.stage = 1
+            if text:
+                g.log(text, "use", seat=self.user, card=vc.name, targets=list(self.targets))
             trigger(g, "card_used", use)
             return
         use = self.use

@@ -50,7 +50,7 @@ python -m sgs.export --games 50 --rollouts 8 -o data/labeled.jsonl     # 附每�
 **跑测试和测速**：
 
 ```bash
-python -m pytest                       # 166 个单测
+python -m pytest                       # 172 个单测
 python -m sgs.tools.bench --games 500  # 每秒对局数、clone 耗时、AI 胜率
 python examples/rollout_label.py       # 在一个决策点给每个动作做 rollout 估值
 ```
@@ -100,13 +100,14 @@ for i, opt in enumerate(g.pending.options):
 
 ## 观察页面
 
-`python -m sgs.replay ... -o out.html` 生成一个自带数据的单文件 HTML，离线也能打开，逐步回放：
+`python -m sgs.replay ... -o out.html` 生成一个自带数据的单文件 HTML，离线也能打开，逐步回放。
+每个事件（摸牌、判定、弃牌、伤害……）和每次询问都是单独一步：
 
-- 双方座位：武将、势力、体力珠、技能（悬停看说明）、四个装备栏、判定区、手牌；
+- 双方座位：武将、势力、体力珠、技能（标出触发技/主动技/锁定技等，悬停看原文；主公技灰色显示）、四个装备栏、判定区、手牌；
 - 中间台面：回合数、阶段进度、处理区、弃牌堆顶、这一步的关键事件；
 - 右侧：这一步的决策（谁、问什么、所有选项、选了哪个，唯一选项会标出“自动”）和按回合分组的日志，点日志可跳到那一步；
 - 底部：双方体力走势图（点击跳转）、播放控制；方向键前进后退，空格播放；
-- 视角切换：上帝视角，或只看某一方能看到的信息（对手手牌显示为背面，私密日志隐藏）。
+- 视角切换：上帝视角，或只看某一方能看到的信息（对手手牌显示为背面，私密日志和对方被问了什么都跳过）。
 
 也可以打开 `web/index.html` 再加载 `-o out.json` 生成的录像文件。
 

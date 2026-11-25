@@ -38,8 +38,7 @@ def _wants(names, name):
 class Jianxiong(Skill):
     name = "奸雄"
     events = ("damaged",)
-    description = "当你受到伤害后，你可以获得对你造成伤害的牌。"
-
+    description = "你可以立即获得对你造成伤害的牌。"
     def can_trigger(self, g, owner, event, ev):
         return ev.target == owner and ev.card is not None and any(c in g.processing for c in ev.card.subcards)
 
@@ -53,8 +52,7 @@ class Jianxiong(Skill):
 class Fankui(Skill):
     name = "反馈"
     events = ("damaged",)
-    description = "当你受到伤害后，你可以获得伤害来源的一张牌。"
-
+    description = "你可以立即从对你造成伤害的来源处获得一张牌。"
     def can_trigger(self, g, owner, event, ev):
         s = ev.source
         return (ev.target == owner and s is not None and s != owner and g.players[s].alive
@@ -69,8 +67,7 @@ class Guicai(Skill):
     name = "鬼才"
     events = ("judge_retrial",)
     self_ask = True
-    description = "在一名角色的判定牌生效前，你可以打出一张手牌代替之。"
-
+    description = "在任意角色的判定牌生效前，你可以打出一张手牌代替之。"
     def can_trigger(self, g, owner, event, ev):
         return bool(g.players[owner].hand)
 
@@ -108,8 +105,7 @@ class GuicaiFrame(Frame):
 class Ganglie(Skill):
     name = "刚烈"
     events = ("damaged",)
-    description = "当你受到伤害后，你可以判定，若结果不为红桃，伤害来源选择一项：弃置两张手牌，或受到你造成的 1 点伤害。"
-
+    description = "你每受到一次伤害，可以进行一次判定：若结果不为红桃，则伤害来源必须二选一：弃两张手牌，或受到你对其造成的 1 点伤害。"
     def can_trigger(self, g, owner, event, ev):
         return ev.target == owner and ev.source is not None and ev.source != owner and g.players[ev.source].alive
 
@@ -157,8 +153,7 @@ class GanglieFrame(Frame):
 class Tuxi(Skill):
     name = "突袭"
     events = ("draw_phase",)
-    description = "摸牌阶段，你可以放弃摸牌，改为获得至多两名其他角色的各一张手牌。"
-
+    description = "摸牌阶段，你可以放弃摸牌，然后从至多两名（至少一名）角色的手牌里各抽取一张牌。"
     def can_trigger(self, g, owner, event, ev):
         return ev.seat == owner and ev.count > 0 and any(g.players[t].hand for t in g.others(owner))
 
@@ -198,8 +193,7 @@ class TuxiFrame(Frame):
 class Luoyi(Skill):
     name = "裸衣"
     events = ("draw_phase", "damage_cause")
-    description = "摸牌阶段，你可以少摸一张牌，然后本回合你使用杀或决斗（你为伤害来源时）造成的伤害 +1。"
-
+    description = "摸牌阶段，你可以少摸一张牌；若如此做，该回合的出牌阶段，你使用杀或决斗（你为伤害来源时）造成的伤害 +1。"
     def is_compulsory(self, event):
         return event == "damage_cause"
 
@@ -222,8 +216,7 @@ class Luoyi(Skill):
 class Tiandu(Skill):
     name = "天妒"
     events = ("judge_done",)
-    description = "当你的判定牌生效后，你可以获得此牌。"
-
+    description = "在你的判定牌生效后，你可以立即获得它。"
     def can_trigger(self, g, owner, event, ev):
         return ev.seat == owner and ev.card in g.processing
 
@@ -236,8 +229,7 @@ class Tiandu(Skill):
 class Yiji(Skill):
     name = "遗计"
     events = ("damaged",)
-    description = "当你受到 1 点伤害后，你可以观看牌堆顶的两张牌，然后将这些牌任意分配给角色。"
-
+    description = "你每受到 1 点伤害，可以摸两张牌，将其中的一张交给任意一名角色，然后将另一张交给任意一名角色。"
     def can_trigger(self, g, owner, event, ev):
         return ev.target == owner
 
@@ -293,8 +285,7 @@ class YijiFrame(Frame):
 @register_skill
 class Qingguo(Skill):
     name = "倾国"
-    description = "你可以将一张黑色手牌当闪使用或打出。"
-
+    description = "你可以将你的黑色手牌当闪使用（或打出）。"
     def view_as(self, g, owner, names, ctx):
         if names is None or "闪" not in names:
             return []
@@ -305,8 +296,7 @@ class Qingguo(Skill):
 class Luoshen(Skill):
     name = "洛神"
     events = ("phase_prepare",)
-    description = "准备阶段，你可以判定，若为黑色，你获得此牌并可以重复此流程。"
-
+    description = "回合开始阶段，你可以进行判定：若为黑色，立即获得此生效后的判定牌，并可以再次使用洛神；如此反复，直到出现红色或你不愿意判定了为止。"
     def can_trigger(self, g, owner, event, ev):
         return ev.seat == owner
 
@@ -348,8 +338,7 @@ class LuoshenFrame(Frame):
 @register_skill
 class Rende(Skill):
     name = "仁德"
-    description = "出牌阶段，你可以将任意张手牌交给其他角色；本阶段你以此法给出第二张牌时，回复 1 点体力。"
-
+    description = "出牌阶段，你可以将任意数量的手牌以任意分配方式交给其他角色，若你给出的牌张数不少于两张时，你回复 1 点体力。"
     def can_activate(self, g, owner):
         return bool(g.players[owner].hand) and bool(g.others(owner))
 
@@ -387,8 +376,7 @@ class RendeFrame(Frame):
 @register_skill
 class Wusheng(Skill):
     name = "武圣"
-    description = "你可以将一张红色牌当杀使用或打出。"
-
+    description = "你可以将你的任意一张红色牌当杀使用或打出。"
     def view_as(self, g, owner, names, ctx):
         if not _wants(names, "杀"):
             return []
@@ -399,8 +387,7 @@ class Wusheng(Skill):
 class Paoxiao(Skill):
     name = "咆哮"
     compulsory = True
-    description = "锁定技，你使用杀无次数限制。"
-
+    description = "出牌阶段，你可以使用任意数量的杀。"
     def slash_limit_mod(self, g, owner):
         return INF
 
@@ -409,8 +396,7 @@ class Paoxiao(Skill):
 class Guanxing(Skill):
     name = "观星"
     events = ("phase_prepare",)
-    description = "准备阶段，你可以观看牌堆顶的 X 张牌（X 为存活角色数且至多为 5），然后以任意顺序置于牌堆顶或牌堆底。"
-
+    description = "回合开始阶段，你可以观看牌堆顶的 X 张牌（X 为存活角色的数量且最多为 5），将其中任意数量的牌以任意顺序置于牌堆顶，其余以任意顺序置于牌堆底。"
     def can_trigger(self, g, owner, event, ev):
         return ev.seat == owner
 
@@ -455,8 +441,7 @@ class GuanxingFrame(Frame):
 class Kongcheng(Skill):
     name = "空城"
     compulsory = True
-    description = "锁定技，若你没有手牌，你不能成为杀或决斗的目标。"
-
+    description = "锁定技，当你没有手牌时，你不能成为杀或决斗的目标。"
     def prohibit(self, g, owner, user, target, vc):
         return target == owner and not g.players[owner].hand and vc.name in ("杀", "决斗")
 
@@ -464,8 +449,7 @@ class Kongcheng(Skill):
 @register_skill
 class Longdan(Skill):
     name = "龙胆"
-    description = "你可以将一张杀当闪、一张闪当杀使用或打出。"
-
+    description = "你可以将你手牌的杀当闪、闪当杀使用或打出。"
     def view_as(self, g, owner, names, ctx):
         hand = g.players[owner].hand
         out = []
@@ -480,8 +464,7 @@ class Longdan(Skill):
 class Mashu(Skill):
     name = "马术"
     compulsory = True
-    description = "锁定技，你计算与其他角色的距离 -1。"
-
+    description = "锁定技，当你计算与其他角色的距离时，始终 -1。"
     def distance_mod(self, g, owner, frm, to):
         return -1 if frm == owner else 0
 
@@ -490,8 +473,7 @@ class Mashu(Skill):
 class Tieqi(Skill):
     name = "铁骑"
     events = ("target_confirm",)
-    description = "当你使用杀指定目标后，你可以判定，若为红色，该角色不能使用闪响应此杀。"
-
+    description = "当你使用杀指定一名角色为目标后，你可以进行判定，若结果为红色，此杀不可被闪避。"
     def can_trigger(self, g, owner, event, ev):
         return ev.use.user == owner and ev.use.card.name == "杀"
 
@@ -522,8 +504,7 @@ class TieqiFrame(Frame):
 class Jizhi(Skill):
     name = "集智"
     events = ("card_used",)
-    description = "当你使用一张非延时类锦囊牌时，你可以摸一张牌。"
-
+    description = "每当你使用一张非延时类锦囊时，（在它结算之前）你可以立即摸一张牌。"
     def can_trigger(self, g, owner, event, ev):
         return ev.user == owner and CARDS[ev.card.name].type == "trick"
 
@@ -535,8 +516,7 @@ class Jizhi(Skill):
 class Qicai(Skill):
     name = "奇才"
     compulsory = True
-    description = "锁定技，你使用锦囊牌无距离限制。"
-
+    description = "你使用任何锦囊无距离限制。"
     def ignore_distance(self, g, owner, user, vc):
         return CARDS[vc.name].is_trick
 
@@ -545,8 +525,7 @@ class Qicai(Skill):
 @register_skill
 class Zhiheng(Skill):
     name = "制衡"
-    description = "出牌阶段限一次，你可以弃置任意张牌，然后摸等量的牌。"
-
+    description = "出牌阶段，你可以弃掉任意数量的牌，然后摸取等量的牌。每回合限用一次。"
     def can_activate(self, g, owner):
         return not _used(g, owner, self.name) and bool(_he(g, owner))
 
@@ -574,8 +553,7 @@ class ZhihengFrame(Frame):
 @register_skill
 class Qixi(Skill):
     name = "奇袭"
-    description = "你可以将一张黑色牌当过河拆桥使用。"
-
+    description = "出牌阶段，你可以将你的任意黑色牌当过河拆桥使用。"
     def view_as(self, g, owner, names, ctx):
         if names is not None and "过河拆桥" not in names:
             return []
@@ -588,8 +566,7 @@ class Qixi(Skill):
 class Keji(Skill):
     name = "克己"
     events = ("phase_discard",)
-    description = "若你未于本回合的出牌阶段内使用或打出过杀，你可以跳过弃牌阶段。"
-
+    description = "若你于出牌阶段未使用或打出过任何一张杀，你可以跳过此回合的弃牌阶段。"
     def can_trigger(self, g, owner, event, ev):
         p = g.players[owner]
         return (ev.seat == owner and not p.turn.get("slash_any")
@@ -602,8 +579,7 @@ class Keji(Skill):
 @register_skill
 class Kurou(Skill):
     name = "苦肉"
-    description = "出牌阶段，你可以失去 1 点体力，然后摸两张牌。"
-
+    description = "出牌阶段，你可以失去 1 点体力，然后摸两张牌。每回合中，你可以多次使用苦肉。"
     def can_activate(self, g, owner):
         return g.players[owner].hp > 0
 
@@ -629,8 +605,7 @@ class KurouFrame(Frame):
 class Yingzi(Skill):
     name = "英姿"
     events = ("draw_phase",)
-    description = "摸牌阶段，你可以多摸一张牌。"
-
+    description = "摸牌阶段，你可以额外摸一张牌。"
     def can_trigger(self, g, owner, event, ev):
         return ev.seat == owner
 
@@ -641,8 +616,7 @@ class Yingzi(Skill):
 @register_skill
 class Fanjian(Skill):
     name = "反间"
-    description = ("出牌阶段限一次，你可以令一名其他角色选择一种花色，然后其获得你的一张手牌并展示，"
-                   "若此牌花色与其所选不同，你对其造成 1 点伤害。")
+    description = "出牌阶段，你可以令另一名角色选择一种花色，抽取你的一张手牌并亮出，若此牌与所选花色不吻合，则你对该角色造成 1 点伤害。然后不论结果，该角色都获得此牌。每回合限用一次。"
 
     def can_activate(self, g, owner):
         return not _used(g, owner, self.name) and bool(g.players[owner].hand) and bool(g.others(owner))
@@ -685,8 +659,7 @@ class FanjianFrame(Frame):
 @register_skill
 class Guose(Skill):
     name = "国色"
-    description = "你可以将一张方块牌当乐不思蜀使用。"
-
+    description = "出牌阶段，你可以将你的任意方块花色的牌当乐不思蜀使用。"
     def view_as(self, g, owner, names, ctx):
         if names is not None:
             return []
@@ -697,8 +670,7 @@ class Guose(Skill):
 class Liuli(Skill):
     name = "流离"
     events = ("target_confirm",)
-    description = "当你成为杀的目标时，你可以弃置一张牌，将此杀转移给你攻击范围内的一名其他角色（不能是使用者）。"
-
+    description = "当你成为杀的目标时，你可以弃一张牌，并将此杀转移给你攻击范围内的另一名角色（该角色不能是此杀的使用者）。"
     def _targets(self, g, owner, ev):
         return [t for t in g.others(owner) if t != ev.use.user and g.in_attack_range(owner, t)
                 and t not in ev.use.info and not g.prohibited(ev.use.user, t, ev.use.card)]
@@ -742,7 +714,6 @@ class Qianxun(Skill):
     name = "谦逊"
     compulsory = True
     description = "锁定技，你不能成为顺手牵羊和乐不思蜀的目标。"
-
     def prohibit(self, g, owner, user, target, vc):
         return target == owner and vc.name in ("顺手牵羊", "乐不思蜀")
 
@@ -751,8 +722,7 @@ class Qianxun(Skill):
 class Lianying(Skill):
     name = "连营"
     events = ("lose_card",)
-    description = "当你失去最后的手牌后，你可以摸一张牌。"
-
+    description = "每当你失去最后一张手牌时，可以立即摸一张牌。"
     def can_trigger(self, g, owner, event, ev):
         return ev.seat == owner and "h" in ev.zones and not g.players[owner].hand
 
@@ -763,8 +733,7 @@ class Lianying(Skill):
 @register_skill
 class Jieyin(Skill):
     name = "结姻"
-    description = "出牌阶段限一次，你可以弃置两张手牌，令一名已受伤的男性角色与你各回复 1 点体力。"
-
+    description = "出牌阶段，你可以弃两张手牌并选择一名受伤的男性角色：你和目标角色各回复 1 点体力。每回合限用一次。"
     def _targets(self, g, owner):
         return [t for t in g.others(owner) if g.players[t].gender == "male" and g.players[t].wounded]
 
@@ -798,8 +767,7 @@ class JieyinFrame(Frame):
 class Xiaoji(Skill):
     name = "枭姬"
     events = ("lose_card",)
-    description = "当你失去装备区里的一张牌后，你可以摸两张牌。"
-
+    description = "当你失去一张装备区里的牌时，你可以立即摸两张牌。"
     def can_trigger(self, g, owner, event, ev):
         return ev.seat == owner and "e" in ev.zones
 
@@ -814,8 +782,7 @@ class Wushuang(Skill):
     name = "无双"
     compulsory = True
     events = ("target_confirm",)
-    description = "锁定技，你使用的杀需两张闪才能抵消；与你决斗的角色每次需打出两张杀。"
-
+    description = "锁定技，你使用杀时，目标角色需连续使用两张闪才能抵消；与你进行决斗的角色每次需连续打出两张杀。"
     def can_trigger(self, g, owner, event, ev):
         n = ev.use.card.name
         if n == "杀":
@@ -835,8 +802,7 @@ class Wushuang(Skill):
 @register_skill
 class Jijiu(Skill):
     name = "急救"
-    description = "你的回合外，你可以将一张红色牌当桃使用。"
-
+    description = "你的回合外，你可以将你的任意红色牌当桃使用。"
     def view_as(self, g, owner, names, ctx):
         if names is None or "桃" not in names or _own_turn(g, owner):
             return []
@@ -846,8 +812,7 @@ class Jijiu(Skill):
 @register_skill
 class Qingnang(Skill):
     name = "青囊"
-    description = "出牌阶段限一次，你可以弃置一张手牌，令一名角色回复 1 点体力。"
-
+    description = "出牌阶段，你可以主动弃掉一张手牌，令任一目标角色回复 1 点体力。每回合限用一次。"
     def _targets(self, g, owner):
         return [t for t in g.alive_seats(owner) if g.players[t].wounded]
 
@@ -878,8 +843,7 @@ class QingnangFrame(Frame):
 @register_skill
 class Lijian(Skill):
     name = "离间"
-    description = "出牌阶段限一次，你可以弃置一张牌，令一名男性角色视为对另一名男性角色使用一张决斗（不能被无懈可击）。"
-
+    description = "出牌阶段，你可以弃一张牌并选择两名男性角色，视为其中一名男性角色对另一名男性角色使用一张决斗（此决斗不能被无懈可击响应）。每回合限用一次。"
     def _males(self, g, owner):
         return [t for t in g.others(owner) if g.players[t].gender == "male"]
 
@@ -922,10 +886,36 @@ class LijianFrame(Frame):
 class Biyue(Skill):
     name = "闭月"
     events = ("phase_finish",)
-    description = "结束阶段，你可以摸一张牌。"
-
+    description = "回合结束阶段，你可以摸一张牌。"
     def can_trigger(self, g, owner, event, ev):
         return ev.seat == owner
 
     def on_trigger(self, g, owner, event, ev):
         g.draw(owner, 1, "闭月")
+
+
+# ====================================================================== 主公技
+# 主公技只有身份局的主公才有，1v1 两人对决里没有主公，所以这三个技能只登记说明、挂在武将的 lord_skills 上，
+# 模式不会把它们发给玩家，也没有实现效果。以后写身份局时在这里补上效果即可（需要其他同势力角色参与）。
+@register_skill
+class Hujia(Skill):
+    name = "护驾"
+    lord = True
+    description = ("主公技，当你需要使用（或打出）一张闪时，你可以发动护驾。所有魏势力角色按行动顺序依次选择是否打出一张闪"
+                   "“提供”给你（视为由你使用或打出），直到有一名角色或没有任何角色决定如此做时为止。")
+
+
+@register_skill
+class Jijiang(Skill):
+    name = "激将"
+    lord = True
+    description = ("主公技，当你需要使用（或打出）一张杀时，你可以发动激将。所有蜀势力角色按行动顺序依次选择是否打出一张杀"
+                   "“提供”给你（视为由你使用或打出），直到有一名角色或没有任何角色决定如此做时为止。")
+
+
+@register_skill
+class Jiuyuan(Skill):
+    name = "救援"
+    lord = True
+    compulsory = True
+    description = "主公技，锁定技，其他吴势力角色在你濒死状态下对你使用桃时，你额外回复 1 点体力。"

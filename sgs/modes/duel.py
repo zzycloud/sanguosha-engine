@@ -2,7 +2,8 @@
 
 规则（可配置）：
 - 两名玩家各一名武将，体力和技能按武将牌；双方互为敌人，一方阵亡即另一方获胜。
-- 起始手牌各 4 张；0 号位先行动，先手第一个摸牌阶段少摸 1 张（first_draw_penalty）。
+- 起始手牌各 4 张；0 号位先行动；摸牌阶段摸 2 张，先手也一样。
+  （first_draw_penalty 可设为 1，模拟一些对战平台“先手首回合少摸一张”的平衡规则，默认不用。）
 - 选将：generals=[a, b] 直接指定；pick="random" 从将池随机；pick="choose" 双方依次从各自 3 名候选里选一名（选将也是决策，可用于训练）。
 - 主公技不生效（1v1 没有主公）。
 
@@ -23,7 +24,7 @@ class DuelMode(Mode):
     num_players = 2
 
     def __init__(self, generals: Optional[Sequence[str]] = None, pick: str = "random",
-                 pool: Optional[Sequence[str]] = None, start_hand: int = 4, first_draw_penalty: int = 1,
+                 pool: Optional[Sequence[str]] = None, start_hand: int = 4, first_draw_penalty: int = 0,
                  candidates: int = 3):
         self.generals = list(generals) if generals else None
         self.pick = pick

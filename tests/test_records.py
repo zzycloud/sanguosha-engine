@@ -8,7 +8,7 @@ from sgs.agents import Agent, RandomAgent, RuleAgent, decide, play_game
 from sgs.core.game import log_text
 from sgs.core.view import HiddenCardError, PlayerView
 from sgs.export import card_table, play_and_export
-from sgs.replay import record
+from sgs.replay import Recorder, record, record_new
 from sgs.testing import blank_game, choose, give
 
 
@@ -211,20 +211,89 @@ def test_card_table_matches_ids():
 def test_replay_includes_single_option_steps():
     g = Game(seed=1, generals=["关羽", "吕布"], auto_single=False)
     rep = record(g, [RuleAgent(1), RuleAgent(2)])
-    assert rep["format"] == "sgs-replay/2"
+    assert rep["format"] == "sgs-replay/3"
     assert any(s["auto"] for s in rep["steps"])
-    assert rep["steps"][-1]["decision"] is None
+    assert rep["steps"][-1]["type"] == "end" and rep["steps"][-1]["decision"] is None
     assert "武圣" in rep["meta"]["skills"] and rep["meta"]["cards"]["杀"]["type"] == "basic"
     n_logs = sum(len(s["logs"]) for s in rep["steps"])
     assert n_logs == len(g.logs)
+
+
+def test_replay_one_event_per_step():
+    rep = record_new([RuleAgent(1), RuleAgent(2)], "duel", seed=1, generals=["关羽", "貂蝉"])
+    events = [s for s in rep["steps"] if s["type"] == "event"]
+    assert events and all(len(s["logs"]) == 1 for s in events)
+    assert all(not s["logs"] for s in rep["steps"] if s["type"] != "event")
+    # 开局的日志也各自一步：两条武将信息、两次起始手牌
+    assert [s["logs"][0]["kind"] for s in rep["steps"][:4]] == ["setup", "setup", "draw", "draw"]
+    # 状态是事件发生之后的：摸牌那一步手牌数已经变了
+    for k, s in enumerate(rep["steps"][1:], 1):
+        if s["type"] == "event" and s["logs"][0]["kind"] == "draw" and "data" in s["logs"][0]:
+            e = s["logs"][0]
+            seat, n = e["data"]["seat"], e["data"]["n"]
+            before = rep["steps"][k - 1]["state"]["players"][seat]["hand_count"]
+            assert s["state"]["players"][seat]["hand_count"] == before + n
+
+
+def test_replay_judge_and_draw_are_separate_steps():
+    g = blank_game(["关羽", "孙权"])
+    give(g, 1, "乐不思蜀")
+    cid = g.players[1].hand.pop()
+    g.players[1].judges.append((cid, "乐不思蜀"))
+    rec = Recorder(g)
+    choose(g, "结束出牌阶段")
+    texts = [s["logs"][0]["text"] for s in rec.steps if s["type"] == "event"]
+    i = next(k for k, t in enumerate(texts) if "判定牌为" in t)
+    j = next(k for k, t in enumerate(texts) if "摸了 2 张牌（摸牌阶段）" in t)
+    assert j > i  # 判定牌、判定结果、摸牌各是一步
+    assert any("乐不思蜀" in t for t in texts[i + 1:j])
+
+
+def test_clone_drops_log_hook():
+    rec = Recorder.new_game("duel", seed=1, generals=["关羽", "吕布"])
+    n = len(rec.steps)
+    c = rec.g.clone()
+    assert c.log_hook is None
+    c.act(len(c.pending.options) - 1)
+    assert len(rec.steps) == n
 
 
 def test_live_session_hides_ai_hand():
     from sgs.tools.serve import Session
     s = Session(0, ["关羽", "吕布"], seed=2)
     rep = s.replay()
-    for st in rep["steps"]:
+    for k, st in enumerate(rep["steps"]):
+        if st["type"] == "decision" and k != len(rep["steps"]) - 1:
+            assert st["decision"]["player"] == 0  # AI 被问了什么不发给浏览器
+        if st["type"] == "event":
+            assert st["logs"]
         assert "hand" not in st["state"]["players"][1]
         assert "deck_top" not in st["state"]
         for e in st["logs"]:
             assert "1" not in {str(k) for k in e.get("private", {})}
+
+
+# ------------------------------------------------------------------ 规则修正
+def test_first_turn_draws_two():
+    g = Game(seed=1, generals=["关羽", "吕布"])
+    assert any(e["text"] == "关羽[0] 摸了 2 张牌（摸牌阶段）" and e["turn"] == 1 for e in g.logs)
+
+
+def test_biyue_is_optional():
+    g = blank_game(["貂蝉", "关羽"])
+    choose(g, "结束出牌阶段")
+    assert "闭月" in g.pending.prompt
+    choose(g, "否")
+    assert not g.players[0].hand
+    assert any("没有发动【闭月】" in t for t in g.visible_logs(None))
+
+
+def test_skill_descriptions_match_flags():
+    from sgs.core import registry as R
+    for name, sk in R.SKILLS.items():
+        if sk.equip:
+            continue
+        if sk.compulsory and sk.events:
+            assert "锁定技" in sk.description, name
+        if sk.events and not sk.compulsory:
+            assert "可以" in sk.description, name

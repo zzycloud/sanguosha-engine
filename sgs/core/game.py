@@ -60,8 +60,10 @@ class Game:
     """
 
     def __init__(self, mode: str = "duel", seed: int = 0, deck: str = "standard", log: bool = True,
-                 auto_single: bool = True, max_turns: int = 200, **mode_config):
+                 auto_single: bool = True, max_turns: int = 200, log_hook=None, **mode_config):
         R.load_all()
+        # 每写一条日志就回调 log_hook(game, entry)（录像用它给每个事件单独拍一张状态快照）。不参与拷贝。
+        self.log_hook = log_hook
         self.seed = seed
         self.rng = random.Random(seed)
         self.mode_name = mode
@@ -178,6 +180,13 @@ class Game:
         self.log(f"游戏结束：{reason}")
         raise GameOver()
 
+    def __getstate__(self):
+        st = self.__dict__
+        if st.get("log_hook") is not None:
+            st = dict(st)
+            st["log_hook"] = None
+        return st
+
     def clone(self) -> "Game":
         """完整拷贝（含随机数状态）。用于 rollout。"""
         return pickle.loads(pickle.dumps(self, protocol=pickle.HIGHEST_PROTOCOL))
@@ -192,6 +201,8 @@ class Game:
         if data:
             entry["data"] = data
         self.logs.append(entry)
+        if self.log_hook is not None:
+            self.log_hook(self, entry)
 
     def pname(self, seat: int) -> str:
         p = self.players[seat]

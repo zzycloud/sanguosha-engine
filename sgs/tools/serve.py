@@ -22,11 +22,11 @@ class Session:
         self.human = human
         seed = random.randrange(10 ** 6) if seed is None else seed
         kw = {"generals": generals} if generals else {"pick": "random"}
-        self.g = Game("duel", seed=seed, auto_single=False, **kw)
+        self.rec = Recorder.new_game("duel", seed=seed, auto_single=False, **kw)
+        self.g = self.rec.g
         self.agents = [RuleAgent(seed), RuleAgent(seed + 1)]
         if human is not None:
             self.agents[human] = None
-        self.rec = Recorder(self.g)
         self.rec.run(self.agents)
 
     def act(self, i):
@@ -41,10 +41,16 @@ class Session:
         viewer = self.human
         if viewer is not None and not g.over:  # 对战进行中：不把 AI 的手牌和私密日志发给浏览器
             steps = []
-            for s in rep["steps"]:
-                s = dict(s, state=_hide(s["state"], viewer), logs=[_hide_log(e, viewer) for e in s["logs"]])
+            last = len(rep["steps"]) - 1
+            for k, s in enumerate(rep["steps"]):
+                logs = [e for e in (_hide_log(e, viewer) for e in s["logs"]) if e.get("text") or e.get("private")]
+                if s["type"] == "event" and not logs:
+                    continue  # 只对 AI 可见的事件（例如 AI 没有使用无懈可击）整步不发
+                if s["type"] == "decision" and s["decision"]["player"] != viewer and k != last:
+                    continue  # AI 被问了什么也不发，免得从“被询问”推断出它有某张牌
+                s = dict(s, state=_hide(s["state"], viewer), logs=logs)
                 if s["decision"] and s["decision"]["player"] != viewer:
-                    s["decision"] = dict(s["decision"], options=["（对手的选项不可见）"])
+                    s["decision"] = dict(s["decision"], prompt="", options=["（对手的选项不可见）"])
                     s["chosen"] = None
                 steps.append(s)
             rep["steps"] = steps

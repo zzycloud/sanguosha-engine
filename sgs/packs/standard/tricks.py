@@ -327,7 +327,9 @@ class IndulgenceFrame(Frame):
             g.clear_processing([self.cid])
             if card.suit != HEART:
                 g.players[self.owner].turn.setdefault("skip", set()).add("play")
-                g.log(f"{g.pname(self.owner)} 将跳过出牌阶段", "info")
+                g.log(f"{g.pname(self.owner)} 的【乐不思蜀】生效，将跳过出牌阶段", "info")
+            else:
+                g.log(f"{g.pname(self.owner)} 的【乐不思蜀】判定为红桃，没有生效", "info")
             g.done()
 
 
@@ -360,9 +362,12 @@ class LightningFrame(Frame):
             if not any(n == "闪电" for _, n in p.judges):
                 p.judges.append((self.cid, "闪电"))
                 if s != self.owner:
-                    g.log(f"闪电移动到 {g.pname(s)} 的判定区", "info")
+                    g.log(f"【闪电】没有生效，移动到 {g.pname(s)} 的判定区", "info")
+                else:
+                    g.log(f"【闪电】没有生效，留在 {g.pname(s)} 的判定区", "info")
                 return
         g.players[self.owner].judges.append((self.cid, "闪电"))
+        g.log(f"【闪电】没有生效，留在 {g.pname(self.owner)} 的判定区", "info")
 
     def step(self, g):
         if self.stage == 0:
